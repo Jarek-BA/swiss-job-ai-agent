@@ -76,12 +76,17 @@ SENDER_PASSWORD
 RECEIVER_EMAIL
 ```
 
+The workflow validates these secrets before running. An empty value is not reported to the log, but the job will stop with the missing-secret names and setup location.
+
 Optional Actions Variables:
 
 ```text
 GEMINI_MODEL
 LINKEDIN_PROCESSED_FOLDER
+AI_ENABLED
 ```
+
+`AI_ENABLED` accepts `yes` or `no`. Manual runs show a required **Run Gemini evaluation?** choice and default to `no`. Scheduled runs use the `AI_ENABLED` repository variable and default to `no` when it is not defined. With AI disabled, the workflow still imports alerts and sends the structured fallback email without requiring or calling Gemini.
 
 The workflow caches `jobs.sqlite3` between runs because GitHub-hosted runners are temporary. The cache is not a permanent backup; export or replace the persistence layer before relying on the history for long-term retention.
 

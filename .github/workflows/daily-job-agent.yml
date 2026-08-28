@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+    inputs:
+      ai_enabled:
+        description: "Run Gemini evaluation?"
+        required: true
+        type: choice
+        options:
+          - "no"
+          - "yes"
+        default: "no"
 
 concurrency:
   group: daily-swiss-job-agent
@@ -15,6 +24,7 @@ permissions:
 env:
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
+  AI_ENABLED: ${{ github.event.inputs.ai_enabled || vars.AI_ENABLED || 'no' }}
   LINKEDIN_ALERT_EMAIL: ${{ secrets.LINKEDIN_ALERT_EMAIL }}
   LINKEDIN_ALERT_PASSWORD: ${{ secrets.LINKEDIN_ALERT_PASSWORD }}
   LINKEDIN_PROCESSED_FOLDER: ${{ vars.LINKEDIN_PROCESSED_FOLDER || 'LinkedIn/Processed' }}
@@ -42,6 +52,26 @@ jobs:
 
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
+
+      - name: Validate required secrets
+        env:
+          REQUIRED_SECRETS: ${{ secrets.GEMINI_API_KEY }}|${{ secrets.LINKEDIN_ALERT_EMAIL }}|${{ secrets.LINKEDIN_ALERT_PASSWORD }}|${{ secrets.SENDER_EMAIL }}|${{ secrets.SENDER_PASSWORD }}|${{ secrets.RECEIVER_EMAIL }}
+          AI_ENABLED: ${{ github.event.inputs.ai_enabled || vars.AI_ENABLED || 'no' }}
+        run: |
+          IFS='|' read -r gemini_key alert_email alert_password sender_email sender_password receiver_email <<< "$REQUIRED_SECRETS"
+          missing=0
+          for value in "$alert_email" "$alert_password" "$sender_email" "$sender_password" "$receiver_email"; do
+            if [ -z "$value" ]; then
+              missing=1
+            fi
+          done
+          if [ "$AI_ENABLED" = "yes" ] && [ -z "$gemini_key" ]; then
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Required GitHub Actions secrets are missing. Configure the mailbox secrets and, when AI_ENABLED is yes, GEMINI_API_KEY under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
 
       - name: Restore job database
         uses: actions/cache/restore@v4

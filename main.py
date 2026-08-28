@@ -670,12 +670,14 @@ def send_fallback_email(jobs):
     send_html_email(subject, body)
 
 def main():
-    if not config.GEMINI_API_KEY:
+    if config.AI_ENABLED and not config.GEMINI_API_KEY:
         print("❌ Error: GEMINI_API_KEY environment variable missing.")
         return
 
-    client = genai.Client(api_key=config.GEMINI_API_KEY)
+    client = genai.Client(api_key=config.GEMINI_API_KEY) if config.AI_ENABLED else None
     initialise_database()
+
+    print(f"🤖 AI evaluation: {'enabled' if config.AI_ENABLED else 'disabled'}")
 
     try:
         imported_alerts = import_linkedin_alerts()
@@ -710,6 +712,19 @@ def main():
                 print(f"ℹ️ Fallback email sent with {len(fallback_jobs)} posting(s).")
             else:
                 print("ℹ️ No new postings to process.")
+        return
+
+    if not config.AI_ENABLED:
+        fallback_jobs = get_fallback_jobs()
+        if fallback_jobs:
+            try:
+                send_fallback_email(fallback_jobs)
+                mark_fallback_notified(fallback_jobs)
+                print(f"ℹ️ AI disabled: fallback email sent with {len(fallback_jobs)} posting(s).")
+            except Exception as e:
+                print(f"❌ Fallback email error; postings remain available: {e}")
+        else:
+            print("ℹ️ AI disabled: no unnotified postings to send.")
         return
 
     print(f"\n📄 Step 2: Fetching details for {len(pending_jobs)} new postings...")

@@ -10,6 +10,7 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+AI_ENABLED = os.getenv("AI_ENABLED", "no").strip().lower() in {"yes", "true", "1"}
 LINKEDIN_ALERT_EMAIL = os.getenv("LINKEDIN_ALERT_EMAIL")
 LINKEDIN_ALERT_PASSWORD = os.getenv("LINKEDIN_ALERT_PASSWORD")
 LINKEDIN_PROCESSED_FOLDER = os.getenv("LINKEDIN_PROCESSED_FOLDER", "LinkedIn/Processed")
