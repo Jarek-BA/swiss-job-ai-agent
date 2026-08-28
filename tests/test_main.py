@@ -62,6 +62,56 @@ class MainTests(unittest.TestCase):
             ],
         )
 
+    def test_jobs_ch_parser_extracts_labeled_metadata_and_removes_location_from_title(self):
+        message = EmailMessage()
+        message.add_alternative(
+            """
+            <table><tr><td>
+              <a href="https://www.jobs.ch/en/vacancies/detail/abc">
+                12 hours ago Assistent Generalagent (w/m/d) Generalagentur Dielsdorf
+                Place of work : Dielsdorf Workload : 100% Contract type : Permanent position
+                die Mobiliar New Is this job relevant to you?
+              </a>
+            </td></tr></table>
+            """,
+            subtype="html",
+        )
+
+        self.assertEqual(
+            main.extract_jobs_ch_alert_links(message),
+            [
+                (
+                    "https://www.jobs.ch/en/vacancies/detail/abc",
+                    (
+                        "Assistent Generalagent (w/m/d) Generalagentur",
+                        "die Mobiliar",
+                        "Dielsdorf",
+                    ),
+                )
+            ],
+        )
+
+    def test_jobs_ch_parser_extracts_labeled_metadata_without_title_location(self):
+        message = EmailMessage()
+        message.add_alternative(
+            """
+            <a href="https://www.jobs.ch/en/vacancies/detail/def">
+              Sachbearbeiter:in Administration Place of work: Wädenswil
+              Workload: 80% Contract type: Permanent position Brupbacher Gatti AG New
+            </a>
+            """,
+            subtype="html",
+        )
+
+        self.assertEqual(
+            main.extract_jobs_ch_alert_links(message)[0][1],
+            (
+                "Sachbearbeiter:in Administration",
+                "Brupbacher Gatti AG",
+                "Wädenswil",
+            ),
+        )
+
     def test_linkedin_comm_url_is_canonicalized(self):
         self.assertEqual(
             main.canonicalise_link(

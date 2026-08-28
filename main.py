@@ -44,6 +44,27 @@ def clean_jobs_ch_title(title):
     title = re.split(r"\s+Place of work:\s*", title, maxsplit=1, flags=re.I)[0]
     return title.strip()
 
+def parse_jobs_ch_alert_metadata(text):
+    text = re.sub(r"\s+", " ", text).strip()
+    metadata = re.search(
+        r"\bPlace of work\s*:\s*(.*?)\s+Workload\s*:", text, flags=re.I
+    )
+    if not metadata:
+        return clean_jobs_ch_title(text), "", ""
+
+    title = clean_jobs_ch_title(text[:metadata.start()])
+    location = metadata.group(1).strip()
+    company_match = re.search(
+        r"\bContract type\s*:\s*(?:Permanent|Temporary)\s+position\s*"
+        r"(.*?)(?=\s+(?:Easy apply|New|Is this job relevant)|$)",
+        text[metadata.end():],
+        flags=re.I,
+    )
+    company = company_match.group(1).strip() if company_match else ""
+    if location and title.lower().endswith(location.lower()):
+        title = title[: -len(location)].rstrip(" ,-/")
+    return title, company, location
+
 # Pydantic modely pro dávkové vyhodnocení
 class SingleJobEvaluation(BaseModel):
     job_index: int
@@ -342,9 +363,8 @@ def extract_jobs_ch_alert_links(message):
                 fields = [field.strip() for field in row_text.split("|") if field.strip()]
                 if fields:
                     title = max([title, *fields], key=len)
-                company = ""
-                location = ""
-                if len(fields) >= 2:
+                title, company, location = parse_jobs_ch_alert_metadata(title)
+                if not company and len(fields) >= 2:
                     company_location = fields[-1]
                     if "," in company_location:
                         company, location = [part.strip() for part in company_location.rsplit(",", 1)]
