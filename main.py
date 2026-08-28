@@ -689,7 +689,11 @@ def send_email(jobs_with_eval):
             </div>""")
         sections.append(f"<h2>{escape(category)} ({len(entries)})</h2>{''.join(cards)}")
     subject = f"Swiss Job AI Agent: {len(jobs_with_eval)} matched job(s)"
-    body = render_email(subject, "Detailed AI evaluation results.", "".join(sections))
+    summary = (
+        "These are the new job postings retrieved from jobs.ch and LinkedIn. "
+        f"A total of {len(jobs_with_eval)} job(s) were found."
+    )
+    body = render_email(subject, summary, "".join(sections))
     send_html_email(subject, body)
 
 def send_fallback_email(jobs):
@@ -710,7 +714,12 @@ def send_fallback_email(jobs):
             </div>""")
         sections.append(f"<h2>{escape(category)} ({len(entries)})</h2>{''.join(cards)}")
     subject = f"Swiss Job AI Agent: fallback job list ({len(jobs)} postings)"
-    body = render_email(subject, "AI evaluation was unavailable. This is the complete structured list of queued postings.", "".join(sections))
+    summary = (
+        "These are the new job postings retrieved from jobs.ch and LinkedIn. "
+        f"A total of {len(jobs)} job(s) were found. "
+        "AI evaluation was unavailable, so this is the complete structured list."
+    )
+    body = render_email(subject, summary, "".join(sections))
     send_html_email(subject, body)
 
 def main():

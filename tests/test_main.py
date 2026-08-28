@@ -190,6 +190,18 @@ class MainTests(unittest.TestCase):
         self.assertIn("Summary &amp; details", rendered)
         self.assertNotIn("{{SUBJECT}}", rendered)
 
+    def test_email_summary_describes_sources_and_total(self):
+        rendered = main.render_email(
+            "Job list",
+            "These are the new job postings retrieved from jobs.ch and LinkedIn. A total of 2 job(s) were found.",
+            "<p>Job section</p>",
+        )
+        self.assertIn(
+            "These are the new job postings retrieved from jobs.ch and LinkedIn.",
+            rendered,
+        )
+        self.assertIn("A total of 2 job(s) were found.", rendered)
+
     def test_job_text_removes_jobs_ch_boilerplate(self):
         cleaned = main.clean_job_text(
             "Contract type: Permanent position Brupbacher Gatti AG New "
