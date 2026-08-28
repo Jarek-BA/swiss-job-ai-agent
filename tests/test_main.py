@@ -132,12 +132,12 @@ class MainTests(unittest.TestCase):
 
         with main.sqlite3.connect(main.DATABASE_PATH) as connection:
             stored = connection.execute(
-                "SELECT title, company, location FROM jobs WHERE link = ?",
+                "SELECT title, company, location, fallback_notified_at FROM jobs WHERE link = ?",
                 ("https://www.jobs.ch/en/vacancies/detail/old",),
             ).fetchone()
         self.assertEqual(
             stored,
-            ("Sachbearbeiter:in Administration", "Brupbacher Gatti AG", "Wädenswil"),
+            ("Sachbearbeiter:in Administration", "Brupbacher Gatti AG", "Wädenswil", None),
         )
 
     def test_linkedin_comm_url_is_canonicalized(self):

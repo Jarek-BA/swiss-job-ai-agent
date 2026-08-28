@@ -141,7 +141,8 @@ def initialise_database():
             parsed_title, parsed_company, parsed_location = parse_jobs_ch_alert_metadata(title)
             connection.execute(
                 "UPDATE jobs SET title = ?, company = COALESCE(NULLIF(company, ''), ?), "
-                "location = COALESCE(NULLIF(location, ''), ?) WHERE link = ?",
+                "location = COALESCE(NULLIF(location, ''), ?), "
+                "fallback_notified_at = NULL WHERE link = ?",
                 (parsed_title, parsed_company, parsed_location, link),
             )
 
