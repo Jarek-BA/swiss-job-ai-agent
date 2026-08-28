@@ -112,6 +112,34 @@ class MainTests(unittest.TestCase):
             ),
         )
 
+    def test_database_backfills_old_jobs_ch_alert_metadata(self):
+        with main.sqlite3.connect(main.DATABASE_PATH) as connection:
+            connection.execute(
+                "INSERT INTO jobs (link, title, source, company, location, status) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    "https://www.jobs.ch/en/vacancies/detail/old",
+                    "Sachbearbeiter:in Administration Place of work : Wädenswil "
+                    "Workload : 80% Contract type : Permanent position Brupbacher Gatti AG",
+                    "jobs.ch",
+                    "",
+                    "",
+                    "ready",
+                ),
+            )
+
+        main.initialise_database()
+
+        with main.sqlite3.connect(main.DATABASE_PATH) as connection:
+            stored = connection.execute(
+                "SELECT title, company, location FROM jobs WHERE link = ?",
+                ("https://www.jobs.ch/en/vacancies/detail/old",),
+            ).fetchone()
+        self.assertEqual(
+            stored,
+            ("Sachbearbeiter:in Administration", "Brupbacher Gatti AG", "Wädenswil"),
+        )
+
     def test_linkedin_comm_url_is_canonicalized(self):
         self.assertEqual(
             main.canonicalise_link(

@@ -65,6 +65,14 @@ def parse_jobs_ch_alert_metadata(text):
         title = title[: -len(location)].rstrip(" ,-/")
     return title, company, location
 
+def normalise_jobs_ch_alert_job(job):
+    title, company, location = parse_jobs_ch_alert_metadata(job["title"])
+    normalised = dict(job)
+    normalised["title"] = title
+    normalised["company"] = job.get("company") or company
+    normalised["location"] = job.get("location") or location
+    return normalised
+
 # Pydantic modely pro dávkové vyhodnocení
 class SingleJobEvaluation(BaseModel):
     job_index: int
@@ -125,6 +133,17 @@ def initialise_database():
                                    ("posted_at", "TEXT")):
             if column not in columns:
                 connection.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
+        rows = connection.execute(
+            "SELECT link, title, company, location FROM jobs "
+            "WHERE source = 'jobs.ch' AND title LIKE '%Place of work%'"
+        ).fetchall()
+        for link, title, company, location in rows:
+            parsed_title, parsed_company, parsed_location = parse_jobs_ch_alert_metadata(title)
+            connection.execute(
+                "UPDATE jobs SET title = ?, company = COALESCE(NULLIF(company, ''), ?), "
+                "location = COALESCE(NULLIF(location, ''), ?) WHERE link = ?",
+                (parsed_title, parsed_company, parsed_location, link),
+            )
 
 def save_discovered_jobs(jobs):
     with sqlite3.connect(DATABASE_PATH) as connection:
@@ -134,6 +153,10 @@ def save_discovered_jobs(jobs):
         )
 
 def save_alert_jobs(jobs):
+    jobs = [
+        normalise_jobs_ch_alert_job(job) if job.get("source", "jobs.ch") == "jobs.ch" else job
+        for job in jobs
+    ]
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.executemany(
                         """INSERT OR IGNORE INTO jobs
