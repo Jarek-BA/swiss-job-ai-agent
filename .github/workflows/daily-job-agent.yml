@@ -12,7 +12,7 @@ on:
         options:
           - "no"
           - "yes"
-        default: "no"
+        default: "yes"
 
 concurrency:
   group: daily-swiss-job-agent
