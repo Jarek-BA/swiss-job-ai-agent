@@ -61,6 +61,30 @@ python -u main.py
 
 The first run may collect many postings and use several Gemini requests. Later runs skip URLs already stored in `jobs.sqlite3` and process only queued work.
 
+## GitHub Actions
+
+`.github/workflows/daily-job-agent.yml` runs the agent daily at 06:00 UTC. It can also be started manually from the **Actions** tab. Runs are serialized so two executions cannot update the SQLite queue at the same time.
+
+Add these GitHub Actions Secrets under **Settings > Secrets and variables > Actions**:
+
+```text
+GEMINI_API_KEY
+LINKEDIN_ALERT_EMAIL
+LINKEDIN_ALERT_PASSWORD
+SENDER_EMAIL
+SENDER_PASSWORD
+RECEIVER_EMAIL
+```
+
+Optional Actions Variables:
+
+```text
+GEMINI_MODEL
+LINKEDIN_PROCESSED_FOLDER
+```
+
+The workflow caches `jobs.sqlite3` between runs because GitHub-hosted runners are temporary. The cache is not a permanent backup; export or replace the persistence layer before relying on the history for long-term retention.
+
 ## Tests
 
 Run the standard-library regression tests without making network, AI, or email requests:
