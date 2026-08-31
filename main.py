@@ -393,6 +393,12 @@ def extract_jobs_ch_alert_links(message):
                     company_location = fields[-1]
                     if "," in company_location:
                         company, location = [part.strip() for part in company_location.rsplit(",", 1)]
+                    elif company_location.strip() != title and not re.search(
+                        r"(?:Place of work|Workload|Contract type|Permanent position|Temporary position)",
+                        company_location,
+                        flags=re.I,
+                    ):
+                        company = company_location.strip()
                 candidate = (title, company, location)
                 if link not in jobs_by_link or len(title) > len(jobs_by_link[link][0]):
                     jobs_by_link[link] = candidate

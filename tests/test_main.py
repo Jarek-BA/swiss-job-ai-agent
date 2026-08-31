@@ -67,6 +67,23 @@ class MainTests(unittest.TestCase):
             ],
         )
 
+    def test_jobs_ch_parser_extracts_company_from_separate_header_field(self):
+        message = EmailMessage()
+        message.add_alternative(
+            """
+            <table><tr>
+              <td><a href="https://www.jobs.ch/en/vacancies/detail/vebego">Sachbearbeiter*in Personal- und Administration (m/w/d)</a></td>
+              <td>Vebego AG</td>
+            </tr></table>
+            """,
+            subtype="html",
+        )
+
+        self.assertEqual(
+            main.extract_jobs_ch_alert_links(message)[0][1],
+            ("Sachbearbeiter*in Personal- und Administration (m/w/d)", "Vebego AG", ""),
+        )
+
     def test_jobs_ch_parser_extracts_labeled_metadata_and_removes_location_from_title(self):
         message = EmailMessage()
         message.add_alternative(
