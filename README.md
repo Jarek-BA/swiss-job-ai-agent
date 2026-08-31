@@ -35,7 +35,7 @@ python -m pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-Create a `.env` file in this directory, or clone the private `personal-ai-agent-config` repository beside this project. The app automatically loads `../personal-ai-agent-config/.env` when it exists. Set `PRIVATE_CONFIG_FILE` to use a different configuration path.
+Create a `.env` file in this directory, or clone the private `personal-ai-agent-config` repository beside this project. The app automatically loads `../personal-ai-agent-config/.env` and the Markdown files in `../personal-ai-agent-config/swiss-job-ai-agent/` when they exist. Set `PRIVATE_CONFIG_DIR` to use a different configuration directory.
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key
