@@ -31,6 +31,8 @@ env:
   SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
   SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
   RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+  CANDIDATE_PROFILE: ${{ secrets.CANDIDATE_PROFILE }}
+  CANDIDATE_PREFERENCES: ${{ secrets.CANDIDATE_PREFERENCES }}
 
 jobs:
   run-agent:
@@ -55,12 +57,12 @@ jobs:
 
       - name: Validate required secrets
         env:
-          REQUIRED_SECRETS: ${{ secrets.GEMINI_API_KEY }}|${{ secrets.LINKEDIN_ALERT_EMAIL }}|${{ secrets.LINKEDIN_ALERT_PASSWORD }}|${{ secrets.SENDER_EMAIL }}|${{ secrets.SENDER_PASSWORD }}|${{ secrets.RECEIVER_EMAIL }}
+          REQUIRED_SECRETS: ${{ secrets.GEMINI_API_KEY }}|${{ secrets.LINKEDIN_ALERT_EMAIL }}|${{ secrets.LINKEDIN_ALERT_PASSWORD }}|${{ secrets.SENDER_EMAIL }}|${{ secrets.SENDER_PASSWORD }}|${{ secrets.RECEIVER_EMAIL }}|${{ secrets.CANDIDATE_PROFILE }}|${{ secrets.CANDIDATE_PREFERENCES }}
           AI_ENABLED: ${{ github.event.inputs.ai_enabled || vars.AI_ENABLED || 'no' }}
         run: |
-          IFS='|' read -r gemini_key alert_email alert_password sender_email sender_password receiver_email <<< "$REQUIRED_SECRETS"
+          IFS='|' read -r gemini_key alert_email alert_password sender_email sender_password receiver_email candidate_profile candidate_preferences <<< "$REQUIRED_SECRETS"
           missing=0
-          for value in "$alert_email" "$alert_password" "$sender_email" "$sender_password" "$receiver_email"; do
+          for value in "$alert_email" "$alert_password" "$sender_email" "$sender_password" "$receiver_email" "$candidate_profile" "$candidate_preferences"; do
             if [ -z "$value" ]; then
               missing=1
             fi

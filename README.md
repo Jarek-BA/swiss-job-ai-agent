@@ -40,8 +40,11 @@ Create a `.env` file in this directory:
 ```env
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-3.5-flash-lite
+CANDIDATE_PROFILE=your_private_candidate_profile
+CANDIDATE_PREFERENCES=your_private_candidate_preferences
 LINKEDIN_ALERT_EMAIL=swiss.jobs.alerts@gmail.com
 LINKEDIN_ALERT_PASSWORD=your_gmail_app_password
+JOBS_CH_ALERT_SENDER=jobmail@jobs.ch
 LINKEDIN_PROCESSED_FOLDER=LinkedIn/Processed
 SENDER_EMAIL=your_gmail_address
 SENDER_PASSWORD=your_gmail_app_password
@@ -74,6 +77,8 @@ LINKEDIN_ALERT_PASSWORD
 SENDER_EMAIL
 SENDER_PASSWORD
 RECEIVER_EMAIL
+CANDIDATE_PROFILE
+CANDIDATE_PREFERENCES
 ```
 
 The workflow validates these secrets before running. An empty value is not reported to the log, but the job will stop with the missing-secret names and setup location.
@@ -82,11 +87,14 @@ Optional Actions Variables:
 
 ```text
 GEMINI_MODEL
+JOBS_CH_ALERT_SENDER
 LINKEDIN_PROCESSED_FOLDER
 AI_ENABLED
 ```
 
 `AI_ENABLED` accepts `yes` or `no`. Manual runs show a required **Run Gemini evaluation?** choice and default to `no`. Scheduled runs use the `AI_ENABLED` repository variable and default to `no` when it is not defined. With AI disabled, the workflow still imports alerts and sends the structured fallback email without requiring or calling Gemini.
+
+`CANDIDATE_PROFILE` and `CANDIDATE_PREFERENCES` contain private candidate data. Keep them only in the local `.env` file or GitHub Actions Secrets; do not commit them to the repository. They may contain multiline text. GitHub limits each secret to 48 KB, which is considerably more than a normal text profile and preference document. The local `.env` file has no comparable application limit, although very large values are harder to maintain as environment variables.
 
 The workflow caches `jobs.sqlite3` between runs because GitHub-hosted runners are temporary. The cache is not a permanent backup; export or replace the persistence layer before relying on the history for long-term retention.
 
@@ -100,7 +108,7 @@ python -m unittest discover -s tests -v
 
 ## Configuration
 
-The candidate profile, preferences, search URL, page limit, batch sizes, and score thresholds are defined in `config.py` and `main.py`. `GEMINI_MODEL` defaults to `gemini-3.5-flash-lite` and can be changed in `.env`.
+The candidate profile and preferences are loaded at runtime from `CANDIDATE_PROFILE` and `CANDIDATE_PREFERENCES`. The search URL, page limit, batch sizes, and score thresholds are defined in `main.py`. `GEMINI_MODEL` defaults to `gemini-3.5-flash-lite` and can be changed in `.env` or GitHub Actions Variables.
 
 LinkedIn and Jobs.ch alerts are read from the optional `LINKEDIN_ALERT_EMAIL` mailbox. The program searches only unseen messages from each alert sender, extracts job URLs, titles, and alert text, records message UIDs, and moves processed messages to `LINKEDIN_PROCESSED_FOLDER`. It does not log in to LinkedIn or scrape LinkedIn pages.
 

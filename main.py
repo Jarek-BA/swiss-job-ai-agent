@@ -579,10 +579,10 @@ def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvalua
     You are an expert Swiss career advisor. Evaluate the following {len(jobs_list)} job listings for the candidate.
 
     CANDIDATE PROFILE:
-    {config.WIFE_CV}
+    {config.CANDIDATE_PROFILE}
 
     PREFERENCES & CONSTRAINTS:
-    {config.WIFE_PREFERENCES}
+    {config.CANDIDATE_PREFERENCES}
 
     LISTINGS:
     {formatted_jobs_text}
@@ -615,10 +615,10 @@ def evaluate_jobs_screening(client: genai.Client, jobs_list: list) -> BatchScree
     the role, location, workload, language, and exclusion preferences. Use a score from 0 to 100.
 
     CANDIDATE PROFILE:
-    {config.WIFE_CV}
+    {config.CANDIDATE_PROFILE}
 
     PREFERENCES:
-    {config.WIFE_PREFERENCES}
+    {config.CANDIDATE_PREFERENCES}
 
     LISTINGS:
     {listings}
@@ -725,6 +725,12 @@ def send_fallback_email(jobs):
 def main():
     if config.AI_ENABLED and not config.GEMINI_API_KEY:
         print("❌ Error: GEMINI_API_KEY environment variable missing.")
+        return
+    if config.AI_ENABLED and not config.CANDIDATE_PROFILE:
+        print("❌ Error: CANDIDATE_PROFILE environment variable missing.")
+        return
+    if config.AI_ENABLED and not config.CANDIDATE_PREFERENCES:
+        print("❌ Error: CANDIDATE_PREFERENCES environment variable missing.")
         return
 
     client = genai.Client(api_key=config.GEMINI_API_KEY) if config.AI_ENABLED else None
