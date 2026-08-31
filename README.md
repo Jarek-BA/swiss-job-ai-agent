@@ -101,6 +101,28 @@ Jobs.ch alerts are read from both `jobmail@jobs.ch` and `info@jobs.ch` by defaul
 
 The local candidate profile and preferences are maintained as Markdown files in the private `personal-ai-agent-config/swiss-job-ai-agent/` repository. GitHub Actions checks out that repository using a read-only `PRIVATE_CONFIG_REPO_TOKEN`; candidate text does not need to be duplicated into GitHub Secrets. Do not commit private candidate data to this public repository.
 
+## Tailored CV Generation
+
+`generate_cv.py` creates a tailored CV from a job URL or raw job-description text. Gemini uses the private candidate profile and preferences to produce structured content without inventing qualifications. The default output is an editable Google Doc copied from the configured master template; PDF output uses the bundled Jinja2 template and WeasyPrint.
+
+Install the dependencies with `python -m pip install -r requirements.txt`, then configure these private values in `.env` or the private configuration repository:
+
+```env
+GOOGLE_DOCS_TEMPLATE_ID=your_master_google_doc_id
+GOOGLE_DRIVE_FOLDER_ID=your_target_folder_id
+USER_EMAIL=your_personal_email
+GOOGLE_SHEETS_CREDENTIALS_PATH=google-service-account.json
+```
+
+The service-account JSON must have access to the master template and target folder. Generate a Google Doc, PDF, or both:
+
+```bash
+python generate_cv.py --url "https://jobs.ch/..." --format both
+python generate_cv.py --text "Job description..." --format pdf --output tailored-cv.pdf
+```
+
+Google Docs output replaces `{{COMPANY}}`, `{{JOB_TITLE}}`, `{{TAILORED_SUMMARY}}`, `{{KEY_SKILLS}}`, `{{EXPERIENCE_HIGHLIGHTS}}`, and `{{COVER_LETTER_INTRO}}` in the copied template and grants `USER_EMAIL` Editor access. The generated PDF and service-account JSON are ignored by Git.
+
 The workflow caches `jobs.sqlite3` between runs because GitHub-hosted runners are temporary. The cache is not a permanent backup; export or replace the persistence layer before relying on the history for long-term retention.
 
 ## Tests
