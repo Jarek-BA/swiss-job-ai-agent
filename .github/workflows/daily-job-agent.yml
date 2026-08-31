@@ -69,7 +69,7 @@ jobs:
         run: |
           IFS='|' read -r gemini_key alert_email alert_password sender_email sender_password receiver_email candidate_profile candidate_preferences <<< "$REQUIRED_SECRETS"
           missing=0
-          for value in "$alert_email" "$alert_password" "$sender_email" "$sender_password" "$receiver_email" "$candidate_profile" "$candidate_preferences"; do
+          for value in "$alert_email" "$alert_password" "$sender_email" "$sender_password" "$receiver_email"; do
             if [ -z "$value" ]; then
               missing=1
             fi
