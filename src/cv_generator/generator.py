@@ -10,12 +10,17 @@ def generate_cv_content(job_description: str) -> TailoredCVContent:
         raise RuntimeError("GEMINI_API_KEY is required to generate tailored CV content")
     if not config.CANDIDATE_PROFILE:
         raise RuntimeError("CANDIDATE_PROFILE is required to generate tailored CV content")
+    if not config.CANDIDATE_CV_INPUT:
+        raise RuntimeError("cv_input.md is required to generate tailored CV content")
 
     prompt = f"""
 Create tailored CV content for this job description.
 
 CANDIDATE PROFILE:
 {config.CANDIDATE_PROFILE}
+
+SOURCE CV CONTENT:
+{config.CANDIDATE_CV_INPUT}
 
 CANDIDATE PREFERENCES:
 {config.CANDIDATE_PREFERENCES}

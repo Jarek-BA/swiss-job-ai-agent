@@ -36,10 +36,16 @@ JOBS_CH_ALERT_SENDERS = tuple(dict.fromkeys(
 # Private candidate configuration is kept as human-readable Markdown files.
 CANDIDATE_PROFILE = read_private_setting("candidate_profile.md")
 CANDIDATE_PREFERENCES = read_private_setting("candidate_preferences.md")
+CANDIDATE_CV_INPUT = read_private_setting("cv_input.md")
 CANDIDATE_PROFILE = CANDIDATE_PROFILE or os.getenv("CANDIDATE_PROFILE", "").strip()
 CANDIDATE_PREFERENCES = CANDIDATE_PREFERENCES or os.getenv("CANDIDATE_PREFERENCES", "").strip()
+CANDIDATE_CV_INPUT = CANDIDATE_CV_INPUT or os.getenv("CANDIDATE_CV_INPUT", "").strip()
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "1wm3GIHo1HGwYJfkU1Yotcg6wb_gKP3hlZMVkSYdTv-I")
 GOOGLE_SHEETS_CREDENTIALS_PATH = os.getenv("GOOGLE_SHEETS_CREDENTIALS_PATH", "google-service-account.json")
 GOOGLE_DOCS_TEMPLATE_ID = os.getenv("GOOGLE_DOCS_TEMPLATE_ID", "")
+GOOGLE_SLIDES_TEMPLATE_ID = os.getenv(
+	"GOOGLE_SLIDES_TEMPLATE_ID",
+	"1RTmF2OYGzvkGjc_Zv3UexyJNbh3S9D_XCIaGsFYpcpk",
+)
 GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
 USER_EMAIL = os.getenv("USER_EMAIL", "")

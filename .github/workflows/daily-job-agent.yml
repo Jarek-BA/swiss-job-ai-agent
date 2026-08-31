@@ -60,6 +60,7 @@ jobs:
         run: |
           test -s private-config/swiss-job-ai-agent/candidate_profile.md
           test -s private-config/swiss-job-ai-agent/candidate_preferences.md
+          test -s private-config/swiss-job-ai-agent/cv_input.md
 
       - name: Set up Python
         uses: actions/setup-python@v5

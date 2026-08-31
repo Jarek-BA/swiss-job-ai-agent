@@ -6,7 +6,7 @@ from urllib.request import Request, urlopen
 from bs4 import BeautifulSoup
 
 from src.cv_generator.generator import generate_cv_content
-from src.services.google_docs_service import create_tailored_google_doc
+from src.services.google_slides_service import create_tailored_google_slides
 from src.services.pdf_service import create_tailored_pdf
 
 
@@ -25,7 +25,7 @@ def parse_args(argv=None):
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--url", help="Job posting URL to fetch")
     source.add_argument("--text", help="Raw job description text")
-    parser.add_argument("--format", choices=("gdoc", "pdf", "both"), default="gdoc")
+    parser.add_argument("--format", choices=("slides", "pdf", "both"), default="slides")
     parser.add_argument("--output", default="tailored-cv.pdf", help="PDF output path")
     return parser.parse_args(argv)
 
@@ -36,8 +36,8 @@ def main(argv=None):
     if not job_description.strip():
         raise ValueError("The job description is empty")
     content = generate_cv_content(job_description)
-    if args.format in ("gdoc", "both"):
-        print(f"Google Doc: {create_tailored_google_doc(content)}")
+    if args.format in ("slides", "both"):
+        print(f"Google Slides: {create_tailored_google_slides(content)}")
     if args.format in ("pdf", "both"):
         print(f"PDF: {create_tailored_pdf(content, args.output)}")
     return 0
