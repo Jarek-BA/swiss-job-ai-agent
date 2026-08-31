@@ -30,3 +30,7 @@ JOBS_CH_ALERT_SENDER = os.getenv("JOBS_CH_ALERT_SENDER", "jobmail@jobs.ch")
 # Private candidate configuration is kept as human-readable Markdown files.
 CANDIDATE_PROFILE = read_private_setting("candidate_profile.md")
 CANDIDATE_PREFERENCES = read_private_setting("candidate_preferences.md")
+CANDIDATE_PROFILE = CANDIDATE_PROFILE or os.getenv("CANDIDATE_PROFILE", "").strip()
+CANDIDATE_PREFERENCES = CANDIDATE_PREFERENCES or os.getenv("CANDIDATE_PREFERENCES", "").strip()
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "1wm3GIHo1HGwYJfkU1Yotcg6wb_gKP3hlZMVkSYdTv-I")
+GOOGLE_SHEETS_CREDENTIALS_PATH = os.getenv("GOOGLE_SHEETS_CREDENTIALS_PATH", "google-service-account.json")

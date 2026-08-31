@@ -3,3 +3,5 @@ pydantic
 python-dotenv
 beautifulsoup4
 playwright
+gspread
+google-auth

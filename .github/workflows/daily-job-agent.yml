@@ -31,6 +31,9 @@ env:
   SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
   SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
   RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+  GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID || '1wm3GIHo1HGwYJfkU1Yotcg6wb_gKP3hlZMVkSYdTv-I' }}
+  GOOGLE_SHEETS_CREDENTIALS_PATH: google-service-account.json
+  GOOGLE_SHEETS_CREDENTIALS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
   CANDIDATE_PROFILE: ${{ secrets.CANDIDATE_PROFILE }}
   CANDIDATE_PREFERENCES: ${{ secrets.CANDIDATE_PREFERENCES }}
 
@@ -42,6 +45,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Create Google Sheets credentials file
+        if: ${{ env.GOOGLE_SHEETS_CREDENTIALS_JSON != '' }}
+        run: printf '%s' "$GOOGLE_SHEETS_CREDENTIALS_JSON" > google-service-account.json
 
       - name: Set up Python
         uses: actions/setup-python@v5

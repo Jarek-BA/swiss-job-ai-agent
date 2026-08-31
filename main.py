@@ -3,6 +3,7 @@ import re
 import sqlite3
 import imaplib
 import email
+from datetime import date
 from html import escape
 from email.header import decode_header
 from urllib.parse import urlsplit, urlunsplit
@@ -645,6 +646,63 @@ def send_html_email(subject, body):
         server.login(config.SENDER_EMAIL, config.SENDER_PASSWORD)
         server.send_message(msg)
 
+def get_gspread_client():
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    credentials = Credentials.from_service_account_file(
+        config.GOOGLE_SHEETS_CREDENTIALS_PATH,
+        scopes=scopes,
+    )
+    return gspread.authorize(credentials)
+
+def append_jobs_to_google_sheet(jobs_with_eval: list) -> int:
+    """Append evaluated jobs to the tracking sheet without duplicating links."""
+    if not jobs_with_eval or not Path(config.GOOGLE_SHEETS_CREDENTIALS_PATH).is_file():
+        return 0
+
+    sheet = get_gspread_client().open_by_key(config.GOOGLE_SHEET_ID).sheet1
+    existing_links = set(sheet.col_values(7)[1:])
+    rows_to_append = []
+    today = date.today().isoformat()
+
+    for job, eval_data in jobs_with_eval:
+        job_link = job.get("link", "")
+        if not job_link or job_link in existing_links:
+            continue
+        summary = eval_data.summary or ""
+        pros = " | ".join(eval_data.pros)
+        if pros:
+            summary = f"{summary}\nPros: {pros}"
+        if eval_data.application_strategy:
+            summary = f"{summary}\nApplication strategy: {eval_data.application_strategy}"
+        rows_to_append.append([
+            job.get("posted_at") or job.get("discovered_at") or today,
+            eval_data.job_title,
+            eval_data.company,
+            eval_data.location,
+            categorise_job(eval_data.job_title),
+            f"{eval_data.match_score}%",
+            job_link,
+            "New",
+            "",
+            "",
+            summary,
+        ])
+        existing_links.add(job_link)
+
+    if rows_to_append:
+        sheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
+    return len(rows_to_append)
+
+def sync_matches_to_google_sheet(jobs_with_eval):
+    try:
+        appended = append_jobs_to_google_sheet(jobs_with_eval)
+        print(f"   Google Sheets: appended {appended} new tracking row(s).")
+    except Exception as error:
+        print(f"   Google Sheets sync failed; email delivery continues: {error}")
+
 def sort_matches(jobs_with_eval):
     return sorted(
         jobs_with_eval,
@@ -763,6 +821,7 @@ def main():
     if not pending_jobs and not ready_jobs and not screened_jobs:
         matches = get_evaluated_matches()
         if matches:
+            sync_matches_to_google_sheet(matches)
             send_email(matches)
             mark_emailed([job for job, _ in matches])
             print(f"✅ Success: Email sent with {len(matches)} position(s)!")
@@ -841,6 +900,7 @@ def main():
     print("\n----------------------------------------")
     if matches:
         try:
+            sync_matches_to_google_sheet(matches)
             send_email(matches)
             mark_emailed([job for job, _ in matches])
             print(f"✅ Success: Email sent with {len(matches)} position(s)!")

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest import mock
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -221,6 +222,37 @@ class MainTests(unittest.TestCase):
         self.assertIn('class="job-card high-match"', card)
         self.assertIn('class="badge badge-high"', card)
         self.assertIn("Highlight invoice processing and Excel experience.", card)
+
+    def test_google_sheet_rows_skip_duplicate_links_and_leave_tracking_fields_blank(self):
+        evaluation = main.SingleJobEvaluation(
+            job_index=1, is_relevant=True, match_score=88,
+            job_title="Office Administrator", company="Example AG",
+            location="Wetzikon", pros=["Excel experience"],
+            cons_or_gaps="Confirm workload", summary="Good fit.",
+            application_strategy="Highlight Excel experience.",
+        )
+        sheet = mock.Mock()
+        sheet.col_values.return_value = ["Job Link", "https://existing.example/job"]
+        client = mock.Mock()
+        client.open_by_key.return_value.sheet1 = sheet
+        original_credentials_path = main.config.GOOGLE_SHEETS_CREDENTIALS_PATH
+        main.config.GOOGLE_SHEETS_CREDENTIALS_PATH = str(Path(self.temp_directory.name) / "credentials.json")
+        Path(main.config.GOOGLE_SHEETS_CREDENTIALS_PATH).touch()
+        original_client = main.get_gspread_client
+        main.get_gspread_client = lambda: client
+        try:
+            jobs = [
+                ({"link": "https://existing.example/job"}, evaluation),
+                ({"link": "https://new.example/job", "posted_at": "2026-08-31"}, evaluation),
+            ]
+            self.assertEqual(main.append_jobs_to_google_sheet(jobs), 1)
+        finally:
+            main.get_gspread_client = original_client
+            main.config.GOOGLE_SHEETS_CREDENTIALS_PATH = original_credentials_path
+        row = sheet.append_rows.call_args.args[0][0]
+        self.assertEqual(row[6], "https://new.example/job")
+        self.assertEqual(row[7:10], ["New", "", ""])
+        self.assertIn("Application strategy: Highlight Excel experience.", row[10])
 
     def test_sort_matches_orders_highest_score_first(self):
         first = main.SingleJobEvaluation(

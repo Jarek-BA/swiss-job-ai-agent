@@ -79,7 +79,10 @@ SENDER_PASSWORD
 RECEIVER_EMAIL
 CANDIDATE_PROFILE
 CANDIDATE_PREFERENCES
+GOOGLE_SHEETS_CREDENTIALS_JSON
 ```
+
+The workflow appends evaluated matches to the configured Google Sheet. Share the sheet with the service account email as an Editor, and store the downloaded service-account JSON as the `GOOGLE_SHEETS_CREDENTIALS_JSON` secret. Existing links are checked in column G before rows are appended. Columns H-J (`Status`, `Applied Date`, and `Application Notes`) are left for manual updates in the sheet.
 
 The workflow validates these secrets before running. An empty value is not reported to the log, but the job will stop with the missing-secret names and setup location.
 
@@ -94,7 +97,7 @@ AI_ENABLED
 
 `AI_ENABLED` accepts `yes` or `no`. Manual runs show a required **Run Gemini evaluation?** choice and default to `no`. Scheduled runs use the `AI_ENABLED` repository variable and default to `no` when it is not defined. With AI disabled, the workflow still imports alerts and sends the structured fallback email without requiring or calling Gemini.
 
-`CANDIDATE_PROFILE` and `CANDIDATE_PREFERENCES` contain private candidate data. Keep them only in the local `.env` file or GitHub Actions Secrets; do not commit them to the repository. They may contain multiline text. GitHub limits each secret to 48 KB, which is considerably more than a normal text profile and preference document. The local `.env` file has no comparable application limit, although very large values are harder to maintain as environment variables.
+The local candidate profile and preferences are maintained as Markdown files in the private `personal-ai-agent-config/swiss-job-ai-agent/` repository. For GitHub Actions, provide the rendered text through the `CANDIDATE_PROFILE` and `CANDIDATE_PREFERENCES` secrets, or add a private checkout step if you later want CI to consume the Markdown files directly. Do not commit private candidate data to this public repository.
 
 The workflow caches `jobs.sqlite3` between runs because GitHub-hosted runners are temporary. The cache is not a permanent backup; export or replace the persistence layer before relying on the history for long-term retention.
 
@@ -108,7 +111,7 @@ python -m unittest discover -s tests -v
 
 ## Configuration
 
-The candidate profile and preferences are loaded at runtime from `CANDIDATE_PROFILE` and `CANDIDATE_PREFERENCES`. The search URL, page limit, batch sizes, and score thresholds are defined in `main.py`. `GEMINI_MODEL` defaults to `gemini-3.5-flash-lite` and can be changed in `.env` or GitHub Actions Variables.
+The candidate profile and preferences are loaded at runtime from `personal-ai-agent-config/swiss-job-ai-agent/candidate_profile.md` and `candidate_preferences.md`, with environment variables as a CI fallback. The Google Sheet ID and service-account key path are configured with `GOOGLE_SHEET_ID` and `GOOGLE_SHEETS_CREDENTIALS_PATH`. The batch sizes and score thresholds are defined in `main.py`; `GEMINI_MODEL` defaults to `gemini-3.5-flash-lite` and can be changed in `.env` or GitHub Actions Variables.
 
 LinkedIn and Jobs.ch alerts are read from the optional `LINKEDIN_ALERT_EMAIL` mailbox. The program searches only unseen messages from each alert sender, extracts job URLs, titles, and alert text, records message UIDs, and moves processed messages to `LINKEDIN_PROCESSED_FOLDER`. It does not log in to LinkedIn or scrape LinkedIn pages.
 
