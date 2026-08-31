@@ -1,8 +1,11 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load the reusable private configuration beside this repository when present.
+default_config_file = Path(__file__).resolve().parent.parent / "personal-ai-agent-config" / ".env"
+config_file = os.getenv("PRIVATE_CONFIG_FILE", str(default_config_file))
+load_dotenv(config_file)
 
 # API and Email Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
