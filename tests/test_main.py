@@ -193,14 +193,34 @@ class MainTests(unittest.TestCase):
     def test_email_summary_describes_sources_and_total(self):
         rendered = main.render_email(
             "Job list",
-            "These are the new job postings retrieved from jobs.ch and LinkedIn. A total of 2 job(s) were found.",
+            "Found 2 matched listings: 1 high-match role (85%+), 2 strong potential matches (75%+), and 0 additional matches.",
             "<p>Job section</p>",
         )
         self.assertIn(
-            "These are the new job postings retrieved from jobs.ch and LinkedIn.",
+            "Found 2 matched listings:",
             rendered,
         )
-        self.assertIn("A total of 2 job(s) were found.", rendered)
+        self.assertIn("1 high-match role", rendered)
+
+    def test_match_card_uses_score_class_and_application_strategy(self):
+        evaluation = main.SingleJobEvaluation(
+            job_index=1,
+            is_relevant=True,
+            match_score=92,
+            job_title="Senior Office Administrator",
+            company="Example AG",
+            location="Wetzikon",
+            pros=["Advanced Excel is relevant"],
+            cons_or_gaps="German requirement should be confirmed",
+            summary="Strong administrative fit.",
+            application_strategy="Highlight invoice processing and Excel experience.",
+        )
+        card = main.render_match_card(
+            {"link": "https://example.com/job"}, evaluation
+        )
+        self.assertIn('class="job-card high-match"', card)
+        self.assertIn('class="badge badge-high"', card)
+        self.assertIn("Highlight invoice processing and Excel experience.", card)
 
     def test_sort_matches_orders_highest_score_first(self):
         first = main.SingleJobEvaluation(

@@ -83,6 +83,7 @@ class SingleJobEvaluation(BaseModel):
     pros: list[str]
     cons_or_gaps: str
     summary: str
+    application_strategy: str = ""
 
 class BatchJobEvaluation(BaseModel):
     evaluations: List[SingleJobEvaluation]
@@ -531,6 +532,9 @@ def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvalua
     for idx, job in enumerate(jobs_list, start=1):
         formatted_jobs_text += f"\n--- JOB [{idx}] ---\n"
         formatted_jobs_text += f"Title: {job['title']}\n"
+        formatted_jobs_text += f"Company: {job.get('company') or 'Not provided'}\n"
+        formatted_jobs_text += f"Location: {job.get('location') or 'Not provided'}\n"
+        formatted_jobs_text += f"Posted: {job.get('posted_at') or 'Unknown'}\n"
         formatted_jobs_text += f"Description: {job['description']}\n"
 
     prompt = f"""
@@ -549,10 +553,13 @@ def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvalua
     system_instruction = (
         "Evaluate each job listing independently and return an array for ALL jobs provided. "
         "Ensure job_index maps strictly to [1], [2], etc. Calibrate scores consistently: "
-        "consider role fit, transferable experience, workload, location, language, and exclusions. "
-        "For scores of 85 or higher, write a concrete 2-3 sentence summary, provide 3-5 specific "
-        "pros tied to the listing and candidate profile, and name the most important risks or gaps. "
-        "For lower scores, keep the summary and pros concise but still evidence-based."
+        "consider role fit, transferable experience, workload, language, exclusions, and location. "
+        "For location, estimate practical commute relevance from Wetzikon, Switzerland; prefer "
+        "nearby Canton Zurich locations or remote work, and penalize clearly impractical commutes. "
+        "For scores of 85 or higher, write a concise 2-3 sentence summary, provide 3-5 specific "
+        "pros tied to the listing and candidate profile, name the most important risks or gaps, "
+        "and give exactly one concrete application strategy tip. For lower scores, keep the "
+        "summary and pros concise but still evidence-based and provide a brief actionable tip."
     )
 
     response = client.models.generate_content(
@@ -568,7 +575,11 @@ def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvalua
 
 def evaluate_jobs_screening(client: genai.Client, jobs_list: list) -> BatchScreeningEvaluation:
     listings = "".join(
-        f"\n--- JOB [{index}] ---\nTitle: {job['title']}\nDescription: {job['description']}\n"
+        f"\n--- JOB [{index}] ---\nTitle: {job['title']}\n"
+        f"Company: {job.get('company') or 'Not provided'}\n"
+        f"Location: {job.get('location') or 'Not provided'}\n"
+        f"Posted: {job.get('posted_at') or 'Unknown'}\n"
+        f"Description: {job['description']}\n"
         for index, job in enumerate(jobs_list, start=1)
     )
     prompt = f"""
@@ -578,6 +589,11 @@ def evaluate_jobs_screening(client: genai.Client, jobs_list: list) -> BatchScree
 
     CANDIDATE PROFILE:
     {config.CANDIDATE_PROFILE}
+
+    LOCATION GUIDANCE:
+    Treat commute practicality from Wetzikon, Canton Zurich as a first-class factor. Prefer
+    nearby Canton Zurich locations and remote roles; flag or reduce scores for impractical
+    locations when the listing provides enough information.
 
     PREFERENCES:
     {config.CANDIDATE_PREFERENCES}
@@ -636,6 +652,26 @@ def sort_matches(jobs_with_eval):
         reverse=True,
     )
 
+def render_match_card(job, eval_data):
+        score = eval_data.match_score
+        badge_class = "badge-high" if score >= 85 else "badge-mid" if score >= 75 else "badge-low"
+        card_class = "job-card high-match" if score >= 85 else "job-card"
+        pros = "".join(f"<li>{escape(pro)}</li>" for pro in eval_data.pros)
+        strategy = eval_data.application_strategy or "Review the original posting and tailor your application to the strongest matching experience."
+        return f"""
+                        <article class="{card_class}">
+                            <div class="job-header">
+                                <a class="job-title" href="{escape(job['link'], quote=True)}">{escape(eval_data.job_title)}</a>
+                                <span class="badge {badge_class}">{score}% match</span>
+                            </div>
+                            <div class="job-meta">{escape(eval_data.company or 'Company not provided')} | {escape(eval_data.location or 'Location not provided')}</div>
+                            <p class="summary-text">{escape(eval_data.summary)}</p>
+                            <div class="section-title">Why it fits</div>
+                            <ul class="pros-list">{pros or '<li>See the detailed assessment below.</li>'}</ul>
+                            <div class="risk-box"><strong>Risks / gaps:</strong> {escape(eval_data.cons_or_gaps or 'None identified')}</div>
+                            <div class="strategy-box"><strong>Application strategy:</strong> {escape(strategy)}</div>
+                        </article>"""
+
 def send_email(jobs_with_eval):
     jobs_with_eval = sort_matches(jobs_with_eval)
     sections = []
@@ -648,20 +684,16 @@ def send_email(jobs_with_eval):
             continue
         cards = []
         for job, eval_data in entries:
-            pros = "".join(f"<li>{escape(pro)}</li>" for pro in eval_data.pros)
-            cards.append(f"""
-            <div class="job">
-              <div class="job-title"><a href="{escape(job['link'], quote=True)}">{escape(eval_data.job_title)}</a></div>
-              <div class="job-meta">{escape(eval_data.company)} | {escape(eval_data.location)} | <span class="score">{eval_data.match_score}% match</span></div>
-              <p><span class="label">Summary:</span> {escape(eval_data.summary)}</p>
-              <p><span class="label">Why it fits:</span></p><ul>{pros}</ul>
-              <p><span class="label">Risks / gaps:</span> {escape(eval_data.cons_or_gaps)}</p>
-            </div>""")
+            cards.append(render_match_card(job, eval_data))
         sections.append(f"<h2>{escape(category)} ({len(entries)})</h2>{''.join(cards)}")
     subject = f"Swiss Job AI Agent: {len(jobs_with_eval)} matched job(s)"
+    high_matches = sum(evaluation.match_score >= 85 for _, evaluation in jobs_with_eval)
+    potential_matches = sum(evaluation.match_score >= 75 for _, evaluation in jobs_with_eval)
+    low_matches = len(jobs_with_eval) - potential_matches
     summary = (
-        "These are the new job postings retrieved from jobs.ch and LinkedIn. "
-        f"A total of {len(jobs_with_eval)} job(s) were found."
+        f"Found {len(jobs_with_eval)} matched listing(s): {high_matches} high-match role(s) "
+        f"(85%+), {potential_matches} strong potential match(es) (75%+), and {low_matches} "
+        "additional match(es)."
     )
     body = render_email(subject, summary, "".join(sections))
     send_html_email(subject, body)
@@ -678,10 +710,13 @@ def send_fallback_email(jobs):
         cards = []
         for job in entries:
             cards.append(f"""
-            <div class="job">
-              <div class="job-title"><a href="{escape(job['link'], quote=True)}">{escape(job['title'])}</a></div>
+                        <article class="job-card">
+                            <div class="job-header">
+                                <a class="job-title" href="{escape(job['link'], quote=True)}">{escape(job['title'])}</a>
+                                <span class="badge badge-low">Not evaluated</span>
+                            </div>
                             <div class="job-meta">Source: {escape(job.get('source') or 'Unknown')} | Company: {escape(job.get('company') or 'Not provided')} | Location: {escape(job.get('location') or 'Not provided')} | Posted: {escape(job.get('posted_at') or job.get('discovered_at') or 'Unknown')}</div>
-            </div>""")
+                        </article>""")
         sections.append(f"<h2>{escape(category)} ({len(entries)})</h2>{''.join(cards)}")
     subject = f"Swiss Job AI Agent: fallback job list ({len(jobs)} postings)"
     summary = (

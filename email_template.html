@@ -2,28 +2,45 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{SUBJECT}}</title>
   <style>
-    body { margin: 0; padding: 24px; background: #f4f6f8; color: #1f2933; font-family: Arial, sans-serif; }
-    .container { max-width: 820px; margin: 0 auto; background: #ffffff; padding: 28px; }
-    h1 { margin: 0 0 8px; color: #17324d; font-size: 24px; }
-    h2 { margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #d9e2ec; color: #17324d; font-size: 18px; }
-    .intro { color: #52606d; }
-    .job { margin: 12px 0; padding: 14px 16px; border-left: 4px solid #3e7cb1; background: #f8fafc; }
-    .job-title { font-size: 16px; font-weight: bold; }
-    .job-meta { margin-top: 5px; color: #52606d; font-size: 14px; }
-    .job a { color: #1261a0; text-decoration: none; }
-    .score { color: #167447; font-weight: bold; }
-    .label { font-weight: bold; }
-    .empty { color: #7b8794; font-style: italic; }
-    .footer { margin-top: 30px; color: #7b8794; font-size: 12px; }
+    body { margin: 0; padding: 20px 0; background: #f8fafc; color: #1e293b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .container { max-width: 720px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+    .header { background: #0f172a; color: #ffffff; padding: 24px 32px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 700; }
+    .intro { margin: 6px 0 0; color: #cbd5e1; font-size: 14px; line-height: 1.5; }
+    .content { padding: 24px 32px; }
+    h2 { margin: 32px 0 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; color: #0f172a; font-size: 16px; text-transform: uppercase; letter-spacing: .05em; }
+    .job-card { margin-bottom: 20px; padding: 18px 20px; border: 1px solid #e2e8f0; border-left: 5px solid #2563eb; border-radius: 6px; background: #ffffff; }
+    .job-card.high-match { border-left-color: #16a34a; }
+    .job-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+    .job-title { font-size: 16px; font-weight: 600; color: #1d4ed8; text-decoration: none; }
+    .job-title:hover { text-decoration: underline; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: 700; color: #ffffff; white-space: nowrap; }
+    .badge-high { background: #16a34a; }
+    .badge-mid { background: #2563eb; }
+    .badge-low { background: #64748b; }
+    .job-meta { margin-bottom: 12px; font-size: 13px; color: #64748b; font-weight: 500; }
+    .summary-text { font-size: 14px; line-height: 1.5; color: #334155; margin: 0 0 12px; }
+    .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-top: 10px; margin-bottom: 4px; }
+    ul.pros-list { margin: 0 0 10px; padding-left: 18px; font-size: 13px; color: #334155; }
+    ul.pros-list li { margin-bottom: 3px; }
+    .risk-box { font-size: 13px; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; padding: 8px 12px; border-radius: 4px; margin-top: 8px; }
+    .strategy-box { font-size: 13px; color: #155e75; background: #ecfeff; border: 1px solid #a5f3fc; padding: 8px 12px; border-radius: 4px; margin-top: 8px; }
+    .footer { margin-top: 0; padding: 20px 32px; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 12px; text-align: center; }
+    @media (max-width: 600px) { body { padding: 0; } .content, .header { padding: 20px; } .job-header { display: block; } .badge { margin-top: 8px; } }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Swiss Job AI Agent</h1>
-    <p class="intro">{{SUMMARY}}</p>
+    <div class="header">
+      <h1>Swiss Job AI Agent</h1>
+      <p class="intro">{{SUMMARY}}</p>
+    </div>
+    <div class="content">
     {{JOB_SECTIONS}}
+    </div>
     <p class="footer">Generated from configured job alerts. Verify the original posting before applying.</p>
   </div>
 </body>
