@@ -642,11 +642,19 @@ def render_email(template_subject, summary, sections):
             .replace("{{SUMMARY}}", escape(summary))
             .replace("{{JOB_SECTIONS}}", sections))
 
+def html_to_plain_text(body):
+    return "\n".join(
+        line.strip()
+        for line in BeautifulSoup(body, "html.parser").get_text("\n").splitlines()
+        if line.strip()
+    )
+
 def send_html_email(subject, body):
-    msg = MIMEMultipart()
+    msg = MIMEMultipart("alternative")
     msg['Subject'] = subject
     msg['From'] = config.SENDER_EMAIL
     msg['To'] = config.RECEIVER_EMAIL
+    msg.attach(MIMEText(html_to_plain_text(body), "plain", "utf-8"))
     msg.attach(MIMEText(body, "html", "utf-8"))
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:

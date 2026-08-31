@@ -84,6 +84,22 @@ class MainTests(unittest.TestCase):
             ("Sachbearbeiter*in Personal- und Administration (m/w/d)", "Vebego AG", ""),
         )
 
+    def test_html_email_has_plain_text_and_html_alternatives(self):
+        message = mock.patch.object(main.smtplib, "SMTP_SSL")
+        smtp_ssl = message.start()
+        self.addCleanup(message.stop)
+
+        main.send_html_email("Subject", "<html><body><h1>Heading</h1><p>Details</p></body></html>")
+
+        sent_message = smtp_ssl.return_value.__enter__.return_value.send_message.call_args.args[0]
+        self.assertEqual(sent_message.get_content_type(), "multipart/alternative")
+        self.assertEqual(
+            [part.get_content_type() for part in sent_message.get_payload()],
+            ["text/plain", "text/html"],
+        )
+        plain_text = sent_message.get_payload()[0].get_payload(decode=True).decode("utf-8")
+        self.assertIn("Heading\nDetails", plain_text)
+
     def test_jobs_ch_parser_extracts_labeled_metadata_and_removes_location_from_title(self):
         message = EmailMessage()
         message.add_alternative(
