@@ -18,6 +18,10 @@ class MainTests(unittest.TestCase):
         main.DATABASE_PATH = self.original_database_path
         self.temp_directory.cleanup()
 
+    def test_jobs_ch_sender_defaults_include_recommendation_sender(self):
+        self.assertIn("jobmail@jobs.ch", main.config.JOBS_CH_ALERT_SENDERS)
+        self.assertIn("info@jobs.ch", main.config.JOBS_CH_ALERT_SENDERS)
+
     def test_jobs_ch_parser_prefers_non_empty_duplicate_title(self):
         message = EmailMessage()
         message.add_alternative(

@@ -26,6 +26,12 @@ LINKEDIN_ALERT_EMAIL = os.getenv("LINKEDIN_ALERT_EMAIL")
 LINKEDIN_ALERT_PASSWORD = os.getenv("LINKEDIN_ALERT_PASSWORD")
 LINKEDIN_PROCESSED_FOLDER = os.getenv("LINKEDIN_PROCESSED_FOLDER", "LinkedIn/Processed")
 JOBS_CH_ALERT_SENDER = os.getenv("JOBS_CH_ALERT_SENDER", "jobmail@jobs.ch")
+JOBS_CH_ALERT_SENDERS = tuple(dict.fromkeys(
+	 sender.strip() for sender in os.getenv(
+		"JOBS_CH_ALERT_SENDERS",
+		f"{JOBS_CH_ALERT_SENDER},info@jobs.ch",
+	).split(",") if sender.strip()
+))
 
 # Private candidate configuration is kept as human-readable Markdown files.
 CANDIDATE_PROFILE = read_private_setting("candidate_profile.md")

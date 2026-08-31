@@ -90,11 +90,14 @@ Optional Actions Variables:
 ```text
 GEMINI_MODEL
 JOBS_CH_ALERT_SENDER
+JOBS_CH_ALERT_SENDERS
 LINKEDIN_PROCESSED_FOLDER
 AI_ENABLED
 ```
 
 `AI_ENABLED` accepts `yes` or `no`. Manual runs show a required **Run Gemini evaluation?** choice and default to `no`. Scheduled runs use the `AI_ENABLED` repository variable and default to `no` when it is not defined. With AI disabled, the workflow still imports alerts and sends the structured fallback email without requiring or calling Gemini.
+
+Jobs.ch alerts are read from both `jobmail@jobs.ch` and `info@jobs.ch` by default. Set `JOBS_CH_ALERT_SENDERS` to a comma-separated list if the sender addresses change. Imported postings follow the same parsing, deduplication, AI evaluation, email, and Google Sheets tracking flow.
 
 The local candidate profile and preferences are maintained as Markdown files in the private `personal-ai-agent-config/swiss-job-ai-agent/` repository. GitHub Actions checks out that repository using a read-only `PRIVATE_CONFIG_REPO_TOKEN`; candidate text does not need to be duplicated into GitHub Secrets. Do not commit private candidate data to this public repository.
 

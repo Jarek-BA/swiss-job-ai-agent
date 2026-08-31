@@ -471,13 +471,14 @@ def import_jobs_ch_alerts():
     with imaplib.IMAP4_SSL("imap.gmail.com") as mailbox:
         mailbox.login(mailbox_name, config.LINKEDIN_ALERT_PASSWORD)
         mailbox.select("INBOX", readonly=False)
-        result, data = mailbox.uid(
-            "search", None, "UNSEEN", "FROM", config.JOBS_CH_ALERT_SENDER
-        )
-        if result != "OK":
-            raise RuntimeError("Could not search the Jobs.ch alert mailbox")
+        alert_uids = set()
+        for sender in config.JOBS_CH_ALERT_SENDERS:
+            result, data = mailbox.uid("search", None, "UNSEEN", "FROM", sender)
+            if result != "OK":
+                raise RuntimeError(f"Could not search Jobs.ch alerts from {sender}")
+            alert_uids.update(data[0].split())
 
-        for uid_bytes in data[0].split():
+        for uid_bytes in sorted(alert_uids, key=lambda value: int(value)):
             uid = uid_bytes.decode("ascii")
             if email_was_processed(mailbox_name, uid):
                 continue
