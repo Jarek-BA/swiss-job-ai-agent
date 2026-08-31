@@ -31,11 +31,10 @@ env:
   SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
   SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
   RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+  PRIVATE_CONFIG_DIR: private-config
   GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID || '1wm3GIHo1HGwYJfkU1Yotcg6wb_gKP3hlZMVkSYdTv-I' }}
   GOOGLE_SHEETS_CREDENTIALS_PATH: google-service-account.json
   GOOGLE_SHEETS_CREDENTIALS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
-  CANDIDATE_PROFILE: ${{ secrets.CANDIDATE_PROFILE }}
-  CANDIDATE_PREFERENCES: ${{ secrets.CANDIDATE_PREFERENCES }}
 
 jobs:
   run-agent:
@@ -46,9 +45,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check out private agent configuration
+        uses: actions/checkout@v4
+        with:
+          repository: Jarek-BA/personal-ai-agent-config
+          token: ${{ secrets.PRIVATE_CONFIG_REPO_TOKEN }}
+          path: private-config
+
       - name: Create Google Sheets credentials file
         if: ${{ env.GOOGLE_SHEETS_CREDENTIALS_JSON != '' }}
         run: printf '%s' "$GOOGLE_SHEETS_CREDENTIALS_JSON" > google-service-account.json
+
+      - name: Validate private candidate configuration
+        run: |
+          test -s private-config/swiss-job-ai-agent/candidate_profile.md
+          test -s private-config/swiss-job-ai-agent/candidate_preferences.md
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -64,12 +75,12 @@ jobs:
 
       - name: Validate required secrets
         env:
-          REQUIRED_SECRETS: ${{ secrets.GEMINI_API_KEY }}|${{ secrets.LINKEDIN_ALERT_EMAIL }}|${{ secrets.LINKEDIN_ALERT_PASSWORD }}|${{ secrets.SENDER_EMAIL }}|${{ secrets.SENDER_PASSWORD }}|${{ secrets.RECEIVER_EMAIL }}|${{ secrets.CANDIDATE_PROFILE }}|${{ secrets.CANDIDATE_PREFERENCES }}
+          REQUIRED_SECRETS: ${{ secrets.GEMINI_API_KEY }}|${{ secrets.LINKEDIN_ALERT_EMAIL }}|${{ secrets.LINKEDIN_ALERT_PASSWORD }}|${{ secrets.SENDER_EMAIL }}|${{ secrets.SENDER_PASSWORD }}|${{ secrets.RECEIVER_EMAIL }}|${{ secrets.PRIVATE_CONFIG_REPO_TOKEN }}
           AI_ENABLED: ${{ github.event.inputs.ai_enabled || vars.AI_ENABLED || 'no' }}
         run: |
-          IFS='|' read -r gemini_key alert_email alert_password sender_email sender_password receiver_email candidate_profile candidate_preferences <<< "$REQUIRED_SECRETS"
+          IFS='|' read -r gemini_key alert_email alert_password sender_email sender_password receiver_email private_config_token <<< "$REQUIRED_SECRETS"
           missing=0
-          for value in "$alert_email" "$alert_password" "$sender_email" "$sender_password" "$receiver_email" "$candidate_profile" "$candidate_preferences"; do
+          for value in "$alert_email" "$alert_password" "$sender_email" "$sender_password" "$receiver_email" "$private_config_token"; do
             if [ -z "$value" ]; then
               missing=1
             fi

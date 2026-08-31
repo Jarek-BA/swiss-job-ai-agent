@@ -77,8 +77,7 @@ LINKEDIN_ALERT_PASSWORD
 SENDER_EMAIL
 SENDER_PASSWORD
 RECEIVER_EMAIL
-CANDIDATE_PROFILE
-CANDIDATE_PREFERENCES
+PRIVATE_CONFIG_REPO_TOKEN
 GOOGLE_SHEETS_CREDENTIALS_JSON
 ```
 
@@ -97,7 +96,7 @@ AI_ENABLED
 
 `AI_ENABLED` accepts `yes` or `no`. Manual runs show a required **Run Gemini evaluation?** choice and default to `no`. Scheduled runs use the `AI_ENABLED` repository variable and default to `no` when it is not defined. With AI disabled, the workflow still imports alerts and sends the structured fallback email without requiring or calling Gemini.
 
-The local candidate profile and preferences are maintained as Markdown files in the private `personal-ai-agent-config/swiss-job-ai-agent/` repository. For GitHub Actions, provide the rendered text through the `CANDIDATE_PROFILE` and `CANDIDATE_PREFERENCES` secrets, or add a private checkout step if you later want CI to consume the Markdown files directly. Do not commit private candidate data to this public repository.
+The local candidate profile and preferences are maintained as Markdown files in the private `personal-ai-agent-config/swiss-job-ai-agent/` repository. GitHub Actions checks out that repository using a read-only `PRIVATE_CONFIG_REPO_TOKEN`; candidate text does not need to be duplicated into GitHub Secrets. Do not commit private candidate data to this public repository.
 
 The workflow caches `jobs.sqlite3` between runs because GitHub-hosted runners are temporary. The cache is not a permanent backup; export or replace the persistence layer before relying on the history for long-term retention.
 
