@@ -21,7 +21,6 @@ import config
 MAX_JOBS_PER_BATCH = 15
 MAX_SCREENING_BATCH = 30
 SCREENING_THRESHOLD = 60
-MAX_SEARCH_PAGES = 5
 MAX_DESCRIPTION_CHARS = 2500
 DATABASE_PATH = Path(__file__).with_name("jobs.sqlite3")
 EMAIL_TEMPLATE_PATH = Path(__file__).with_name("email_template.html")
@@ -509,47 +508,6 @@ def import_jobs_ch_alerts():
             imported += len(jobs)
     return imported
 
-def fetch_jobs_with_playwright():
-    """Scrapes job list from jobs.ch using headless browser."""
-    jobs = []
-
-    print("🌐 Opening jobs.ch search pages")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
-        try:
-            for page_number in range(1, MAX_SEARCH_PAGES + 1):
-                search_url = (
-                    "https://www.jobs.ch/en/vacancies/?publication-date=1&"
-                    "term=sachbearbeiter%20administration&location=Z%C3%BCrich&"
-                    f"page={page_number}"
-                )
-                print(f"   Page {page_number}/{MAX_SEARCH_PAGES}")
-                page.goto(search_url, wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(1000)
-                soup = BeautifulSoup(page.content(), "html.parser")
-
-                page_jobs = []
-                for anchor in soup.find_all("a", href=True):
-                    href = anchor["href"]
-                    if "/en/vacancies/detail/" in href:
-                        full_url = "https://www.jobs.ch" + href if href.startswith("/") else href
-                        title = clean_jobs_ch_title(anchor.get_text(" ", strip=True))
-                        if title and len(title) > 3:
-                            page_jobs.append({"title": title, "link": full_url})
-                jobs.extend(page_jobs)
-                if not page_jobs:
-                    break
-        except Exception as e:
-            print(f"❌ Playwright error: {e}")
-        finally:
-            browser.close()
-
-    return list({j['link']: j for j in jobs}.values())
-
 def fetch_job_detail_page(page, job_url):
     """Extracts description text from detail page."""
     try:
@@ -589,8 +547,12 @@ def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvalua
     """
 
     system_instruction = (
-        "Evaluate each job listing independently. Return an array of evaluations for ALL jobs provided. "
-        "Ensure job_index maps strictly to [1], [2], etc."
+        "Evaluate each job listing independently and return an array for ALL jobs provided. "
+        "Ensure job_index maps strictly to [1], [2], etc. Calibrate scores consistently: "
+        "consider role fit, transferable experience, workload, location, language, and exclusions. "
+        "For scores of 85 or higher, write a concrete 2-3 sentence summary, provide 3-5 specific "
+        "pros tied to the listing and candidate profile, and name the most important risks or gaps. "
+        "For lower scores, keep the summary and pros concise but still evidence-based."
     )
 
     response = client.models.generate_content(
@@ -667,7 +629,15 @@ def send_html_email(subject, body):
         server.login(config.SENDER_EMAIL, config.SENDER_PASSWORD)
         server.send_message(msg)
 
+def sort_matches(jobs_with_eval):
+    return sorted(
+        jobs_with_eval,
+        key=lambda item: item[1].match_score,
+        reverse=True,
+    )
+
 def send_email(jobs_with_eval):
+    jobs_with_eval = sort_matches(jobs_with_eval)
     sections = []
     grouped = {category: [] for category in JOB_CATEGORIES}
     for job, eval_data in jobs_with_eval:
@@ -748,13 +718,11 @@ def main():
     except Exception as e:
         print(f"❌ Alert mailbox error; continuing with other sources: {e}")
 
-    print("\n🔍 Step 1: Scraping jobs via Playwright...")
-    jobs = fetch_jobs_with_playwright()
-    save_discovered_jobs(jobs)
     pending_jobs = get_pending_jobs()
     ready_jobs = get_ready_jobs()
     screened_jobs = get_screened_jobs()
-    print(f"📡 Found {len(jobs)} listings; {len(pending_jobs)} need details, "
+    print(f"📡 Email alerts queued {len(pending_jobs) + len(ready_jobs) + len(screened_jobs)} listings; "
+          f"{len(pending_jobs)} need details, "
           f"{len(ready_jobs)} need screening, {len(screened_jobs)} await detailed evaluation.")
 
     if not pending_jobs and not ready_jobs and not screened_jobs:

@@ -202,6 +202,18 @@ class MainTests(unittest.TestCase):
         )
         self.assertIn("A total of 2 job(s) were found.", rendered)
 
+    def test_sort_matches_orders_highest_score_first(self):
+        first = main.SingleJobEvaluation(
+            job_index=1, is_relevant=True, match_score=75, job_title="Lower",
+            company="Company", location="Zurich", pros=[], cons_or_gaps="", summary="",
+        )
+        second = main.SingleJobEvaluation(
+            job_index=2, is_relevant=True, match_score=92, job_title="Higher",
+            company="Company", location="Zurich", pros=[], cons_or_gaps="", summary="",
+        )
+        matches = main.sort_matches([({"link": "lower"}, first), ({"link": "higher"}, second)])
+        self.assertEqual([evaluation.match_score for _, evaluation in matches], [92, 75])
+
     def test_job_text_removes_jobs_ch_boilerplate(self):
         cleaned = main.clean_job_text(
             "Contract type: Permanent position Brupbacher Gatti AG New "

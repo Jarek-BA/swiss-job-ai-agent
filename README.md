@@ -4,12 +4,12 @@ An automated Swiss job scout for administrative and back-office roles in Canton 
 
 ## How It Works
 
-1. Playwright opens up to five pages of the jobs.ch search results.
+1. Gmail IMAP reads new LinkedIn and jobs.ch alert emails.
 2. Job URLs are deduplicated and stored in `jobs.sqlite3`.
-3. New postings are opened once and their detail text is saved locally.
+3. New postings are opened once with Playwright and their detail text is saved locally when AI evaluation is enabled.
 4. Gemini performs a compact screening pass, up to 30 postings per request.
 5. Only potential matches are sent to detailed evaluation, in batches of 15.
-6. Matches scoring at least 70% are sent by email and marked as `emailed`.
+6. Matches scoring at least 70% are sent by email and marked as `emailed`, highest scores first.
 
 The database prevents a posting from being processed repeatedly. Jobs that fail during scraping, AI evaluation, or email delivery remain queued for a later run.
 
@@ -28,7 +28,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install Python dependencies and the Chromium browser used by Playwright:
+Install Python dependencies and the Chromium browser used for AI detail-page enrichment:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -112,7 +112,7 @@ The candidate profile and preferences are loaded at runtime from `CANDIDATE_PROF
 
 LinkedIn and Jobs.ch alerts are read from the optional `LINKEDIN_ALERT_EMAIL` mailbox. The program searches only unseen messages from each alert sender, extracts job URLs, titles, and alert text, records message UIDs, and moves processed messages to `LINKEDIN_PROCESSED_FOLDER`. It does not log in to LinkedIn or scrape LinkedIn pages.
 
-The current jobs.ch scraper uses a hard-coded search URL. The `RSS_FEEDS` list in `config.py` is retained for future feed-based discovery but is not used by the current Playwright implementation.
+Playwright is used only to enrich alert postings with detail-page text when AI evaluation is enabled. Job discovery comes from the configured Gmail alerts.
 
 ## Local State
 

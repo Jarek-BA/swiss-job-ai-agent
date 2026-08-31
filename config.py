@@ -19,11 +19,3 @@ JOBS_CH_ALERT_SENDER = os.getenv("JOBS_CH_ALERT_SENDER", "jobmail@jobs.ch")
 # Private candidate configuration. Set these in local .env or GitHub Actions Secrets.
 CANDIDATE_PROFILE = os.getenv("CANDIDATE_PROFILE", "").strip()
 CANDIDATE_PREFERENCES = os.getenv("CANDIDATE_PREFERENCES", "").strip()
-
-# Swiss Job Portals RSS Feeds
-# Note: You can expand this list with more RSS URLs or tailored search queries
-RSS_FEEDS = [
-    "https://www.jobs.ch/en/jobs/rss/?term=sachbearbeiter",
-    "https://www.jobs.ch/en/jobs/rss/?term=administration",
-    "https://www.jobs.ch/en/jobs/rss/?term=back%20office",
-]
