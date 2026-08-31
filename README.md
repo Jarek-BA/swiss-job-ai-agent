@@ -121,7 +121,7 @@ python generate_cv.py --url "https://jobs.ch/..." --format both
 python generate_cv.py --text "Job description..." --format pdf --output tailored-cv.pdf
 ```
 
-Google Docs output replaces `{{COMPANY}}`, `{{JOB_TITLE}}`, `{{TAILORED_SUMMARY}}`, `{{KEY_SKILLS}}`, `{{EXPERIENCE_HIGHLIGHTS}}`, and `{{COVER_LETTER_INTRO}}` in the copied template and grants `USER_EMAIL` Editor access. The generated PDF and service-account JSON are ignored by Git.
+The private CV template is `personal-ai-agent-config/swiss-job-ai-agent/cv_template.html`. Google Docs output replaces `{{COMPANY}}`, `{{JOB_TITLE}}`, `{{TAILORED_SUMMARY}}`, `{{KEY_SKILLS}}`, `{{EXPERIENCE_HIGHLIGHTS}}`, and `{{COVER_LETTER_INTRO}}` in the copied template and grants `USER_EMAIL` Editor access. The generated PDF and service-account JSON are ignored by Git.
 
 The workflow caches `jobs.sqlite3` between runs because GitHub-hosted runners are temporary. The cache is not a permanent backup; export or replace the persistence layer before relying on the history for long-term retention.
 

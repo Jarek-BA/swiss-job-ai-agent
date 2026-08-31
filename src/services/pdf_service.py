@@ -16,7 +16,10 @@ def _contact_info() -> str:
 
 
 def create_tailored_pdf(content: TailoredCVContent, output_path: str) -> str:
-    template_dir = Path(__file__).resolve().parents[2] / "templates"
+    template_dir = config.config_dir / "swiss-job-ai-agent"
+    template_path = template_dir / "cv_template.html"
+    if not template_path.is_file():
+        raise FileNotFoundError(f"Private CV template not found: {template_path}")
     environment = Environment(loader=FileSystemLoader(template_dir), autoescape=select_autoescape(["html"]))
     rendered_html = environment.get_template("cv_template.html").render(
         content=content,
