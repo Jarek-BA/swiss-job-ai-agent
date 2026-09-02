@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 default_config_dir = Path(__file__).resolve().parent.parent / "personal-ai-agent-config"
 config_dir = Path(os.getenv("PRIVATE_CONFIG_DIR", str(default_config_dir)))
 load_dotenv(config_dir / ".env")
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 def read_private_setting(filename):
@@ -48,4 +49,6 @@ GOOGLE_SLIDES_TEMPLATE_ID = os.getenv(
 	"1RTmF2OYGzvkGjc_Zv3UexyJNbh3S9D_XCIaGsFYpcpk",
 )
 GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
+if "/folders/" in GOOGLE_DRIVE_FOLDER_ID:
+	GOOGLE_DRIVE_FOLDER_ID = GOOGLE_DRIVE_FOLDER_ID.split("/folders/", 1)[1].split("?", 1)[0].rstrip("/")
 USER_EMAIL = os.getenv("USER_EMAIL", "")

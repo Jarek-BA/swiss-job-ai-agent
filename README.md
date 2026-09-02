@@ -109,12 +109,12 @@ Install the dependencies with `python -m pip install -r requirements.txt`, then 
 
 ```env
 GOOGLE_SLIDES_TEMPLATE_ID=1RTmF2OYGzvkGjc_Zv3UexyJNbh3S9D_XCIaGsFYpcpk
-GOOGLE_DRIVE_FOLDER_ID=your_target_folder_id
+GOOGLE_DRIVE_FOLDER_ID=your_target_folder_id_or_drive_folder_url
 USER_EMAIL=your_personal_email
 GOOGLE_SHEETS_CREDENTIALS_PATH=google-service-account.json
 ```
 
-Store `cv_input.md` in `personal-ai-agent-config/swiss-job-ai-agent/` with the extracted content of the real CV. The service-account JSON must have access to the Slides template and target folder. Generate a Google Slides presentation, PDF, or both:
+Store `cv_input.md` in `personal-ai-agent-config/swiss-job-ai-agent/` with the extracted content of the real CV. The service-account JSON must have access to the Slides template and target folder. `GOOGLE_DRIVE_FOLDER_ID` may be a folder ID or a full Drive folder URL. Generate a Google Slides presentation, PDF, or both:
 
 ```bash
 python generate_cv.py --url "https://jobs.ch/..." --format both
