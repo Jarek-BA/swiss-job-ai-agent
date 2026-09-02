@@ -100,6 +100,27 @@ class MainTests(unittest.TestCase):
         plain_text = sent_message.get_payload()[0].get_payload(decode=True).decode("utf-8")
         self.assertIn("Heading\nDetails", plain_text)
 
+    def test_dry_run_skips_mailbox_move(self):
+        original_dry_run = main.DRY_RUN
+        self.addCleanup(setattr, main, "DRY_RUN", original_dry_run)
+        main.DRY_RUN = True
+        mailbox = mock.Mock()
+
+        main.move_email_to_processed_folder(mailbox, "123")
+
+        mailbox.assert_not_called()
+
+    def test_dry_run_skips_google_sheets_sync(self):
+        original_dry_run = main.DRY_RUN
+        self.addCleanup(setattr, main, "DRY_RUN", original_dry_run)
+        main.DRY_RUN = True
+        matches = [mock.sentinel.match]
+
+        with mock.patch.object(main, "append_jobs_to_google_sheet") as append:
+            main.sync_matches_to_google_sheet(matches)
+
+        append.assert_not_called()
+
     def test_jobs_ch_parser_extracts_labeled_metadata_and_removes_location_from_title(self):
         message = EmailMessage()
         message.add_alternative(

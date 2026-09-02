@@ -3,6 +3,9 @@ import re
 import sqlite3
 import imaplib
 import email
+import shutil
+import tempfile
+import argparse
 from datetime import date
 from html import escape
 from email.header import decode_header
@@ -31,6 +34,7 @@ JOB_CATEGORIES = (
     "Sachbearbeitung & Kaufmännisch",
     "Business Support, Sales Ops & Data",
 )
+DRY_RUN = False
 
 def clean_job_text(text):
     text = re.sub(r"\bContract type:\s*Permanent position\b", "", text, flags=re.I)
@@ -192,6 +196,8 @@ def mark_email_processed(mailbox, uid):
         )
 
 def move_email_to_processed_folder(mailbox, uid):
+    if DRY_RUN:
+        return
     folder = config.LINKEDIN_PROCESSED_FOLDER
     result, _ = mailbox.select(folder, readonly=False)
     if result != "OK":
@@ -418,7 +424,7 @@ def import_linkedin_alerts():
     print("📬 Reading LinkedIn alert emails...")
     with imaplib.IMAP4_SSL("imap.gmail.com") as mailbox:
         mailbox.login(mailbox_name, config.LINKEDIN_ALERT_PASSWORD)
-        mailbox.select("INBOX", readonly=False)
+        mailbox.select("INBOX", readonly=DRY_RUN)
         result, data = mailbox.uid(
             "search", None, "UNSEEN", "FROM", "jobalerts-noreply@linkedin.com"
         )
@@ -429,7 +435,8 @@ def import_linkedin_alerts():
             uid = uid_bytes.decode("ascii")
             if email_was_processed(mailbox_name, uid):
                 continue
-            result, message_data = mailbox.uid("fetch", uid, "(RFC822)")
+            fetch_command = "(BODY.PEEK[])" if DRY_RUN else "(RFC822)"
+            result, message_data = mailbox.uid("fetch", uid, fetch_command)
             if result != "OK":
                 continue
             raw_message = next(
@@ -476,7 +483,7 @@ def import_jobs_ch_alerts():
     print("📬 Reading Jobs.ch alert emails...")
     with imaplib.IMAP4_SSL("imap.gmail.com") as mailbox:
         mailbox.login(mailbox_name, config.LINKEDIN_ALERT_PASSWORD)
-        mailbox.select("INBOX", readonly=False)
+        mailbox.select("INBOX", readonly=DRY_RUN)
         alert_uids = set()
         for sender in config.JOBS_CH_ALERT_SENDERS:
             result, data = mailbox.uid("search", None, "UNSEEN", "FROM", sender)
@@ -488,7 +495,8 @@ def import_jobs_ch_alerts():
             uid = uid_bytes.decode("ascii")
             if email_was_processed(mailbox_name, uid):
                 continue
-            result, message_data = mailbox.uid("fetch", uid, "(RFC822)")
+            fetch_command = "(BODY.PEEK[])" if DRY_RUN else "(RFC822)"
+            result, message_data = mailbox.uid("fetch", uid, fetch_command)
             if result != "OK":
                 continue
             raw_message = next(
@@ -712,6 +720,9 @@ def append_jobs_to_google_sheet(jobs_with_eval: list) -> int:
     return len(rows_to_append)
 
 def sync_matches_to_google_sheet(jobs_with_eval):
+    if DRY_RUN:
+        print("   Dry run: Google Sheets sync skipped.")
+        return
     try:
         appended = append_jobs_to_google_sheet(jobs_with_eval)
         print(f"   Google Sheets: appended {appended} new tracking row(s).")
@@ -732,17 +743,17 @@ def render_match_card(job, eval_data):
         pros = "".join(f"<li>{escape(pro)}</li>" for pro in eval_data.pros)
         strategy = eval_data.application_strategy or "Review the original posting and tailor your application to the strongest matching experience."
         return f"""
-                        <article class="{card_class}">
-                            <div class="job-header">
-                                <a class="job-title" href="{escape(job['link'], quote=True)}">{escape(eval_data.job_title)}</a>
-                                <span class="badge {badge_class}">{score}% match</span>
+                        <article class="{card_class}" style="margin-bottom:20px; padding:18px 20px; border:1px solid #e2e8f0; border-left:5px solid {'#16a34a' if score >= 85 else '#2563eb'}; border-radius:6px; background:#ffffff;">
+                            <div class="job-header" style="margin-bottom:8px;">
+                                <a class="job-title" style="display:block; font-size:16px; line-height:1.4; font-weight:600; color:#1d4ed8; text-decoration:none; overflow-wrap:anywhere;" href="{escape(job['link'], quote=True)}">{escape(eval_data.job_title)}</a>
+                                <span class="badge {badge_class}" style="display:inline-block; margin-top:8px; padding:3px 8px; border-radius:12px; font-size:12px; line-height:1.3; font-weight:700; color:#ffffff; background:{'#16a34a' if badge_class == 'badge-high' else '#2563eb' if badge_class == 'badge-mid' else '#64748b'}; white-space:nowrap;">{score}% match</span>
                             </div>
-                            <div class="job-meta">{escape(eval_data.company or 'Company not provided')} | {escape(eval_data.location or 'Location not provided')}</div>
-                            <p class="summary-text">{escape(eval_data.summary)}</p>
-                            <div class="section-title">Why it fits</div>
-                            <ul class="pros-list">{pros or '<li>See the detailed assessment below.</li>'}</ul>
-                            <div class="risk-box"><strong>Risks / gaps:</strong> {escape(eval_data.cons_or_gaps or 'None identified')}</div>
-                            <div class="strategy-box"><strong>Application strategy:</strong> {escape(strategy)}</div>
+                            <div class="job-meta" style="margin-bottom:12px; font-size:13px; line-height:1.5; color:#64748b; font-weight:500;">{escape(eval_data.company or 'Company not provided')} | {escape(eval_data.location or 'Location not provided')}</div>
+                            <p class="summary-text" style="margin:0 0 12px; font-size:14px; line-height:1.5; color:#334155;">{escape(eval_data.summary)}</p>
+                            <div class="section-title" style="margin:10px 0 4px; font-size:12px; line-height:1.4; font-weight:700; text-transform:uppercase; color:#64748b;">Why it fits</div>
+                            <ul class="pros-list" style="margin:0 0 10px; padding-left:18px; font-size:13px; line-height:1.5; color:#334155;">{pros or '<li>See the detailed assessment below.</li>'}</ul>
+                            <div class="risk-box" style="margin-top:8px; padding:8px 12px; border:1px solid #fecaca; border-radius:4px; background:#fef2f2; color:#991b1b; font-size:13px; line-height:1.5;"><strong>Risks / gaps:</strong> {escape(eval_data.cons_or_gaps or 'None identified')}</div>
+                            <div class="strategy-box" style="margin-top:8px; padding:8px 12px; border:1px solid #a5f3fc; border-radius:4px; background:#ecfeff; color:#155e75; font-size:13px; line-height:1.5;"><strong>Application strategy:</strong> {escape(strategy)}</div>
                         </article>"""
 
 def send_email(jobs_with_eval):
@@ -758,7 +769,7 @@ def send_email(jobs_with_eval):
         cards = []
         for job, eval_data in entries:
             cards.append(render_match_card(job, eval_data))
-        sections.append(f"<h2>{escape(category)} ({len(entries)})</h2>{''.join(cards)}")
+        sections.append(f'<h2 style="margin:32px 0 16px; padding-bottom:8px; border-bottom:2px solid #e2e8f0; color:#0f172a; font-size:16px; line-height:1.4; text-transform:uppercase; letter-spacing:.05em;">{escape(category)} ({len(entries)})</h2>{"".join(cards)}')
     subject = f"Swiss Job AI Agent: {len(jobs_with_eval)} matched job(s)"
     high_matches = sum(evaluation.match_score >= 85 for _, evaluation in jobs_with_eval)
     potential_matches = sum(evaluation.match_score >= 75 for _, evaluation in jobs_with_eval)
@@ -783,14 +794,14 @@ def send_fallback_email(jobs):
         cards = []
         for job in entries:
             cards.append(f"""
-                        <article class="job-card">
-                            <div class="job-header">
-                                <a class="job-title" href="{escape(job['link'], quote=True)}">{escape(job['title'])}</a>
-                                <span class="badge badge-low">Not evaluated</span>
+                        <article class="job-card" style="margin-bottom:20px; padding:18px 20px; border:1px solid #e2e8f0; border-left:5px solid #2563eb; border-radius:6px; background:#ffffff;">
+                            <div class="job-header" style="margin-bottom:8px;">
+                                <a class="job-title" style="display:block; font-size:16px; line-height:1.4; font-weight:600; color:#1d4ed8; text-decoration:none; overflow-wrap:anywhere;" href="{escape(job['link'], quote=True)}">{escape(job['title'])}</a>
+                                <span class="badge badge-low" style="display:inline-block; margin-top:8px; padding:3px 8px; border-radius:12px; font-size:12px; line-height:1.3; font-weight:700; color:#ffffff; background:#64748b; white-space:nowrap;">Not evaluated</span>
                             </div>
-                            <div class="job-meta">Source: {escape(job.get('source') or 'Unknown')} | Company: {escape(job.get('company') or 'Not provided')} | Location: {escape(job.get('location') or 'Not provided')} | Posted: {escape(job.get('posted_at') or job.get('discovered_at') or 'Unknown')}</div>
+                            <div class="job-meta" style="margin-bottom:12px; font-size:13px; line-height:1.5; color:#64748b; font-weight:500;">Source: {escape(job.get('source') or 'Unknown')} | Company: {escape(job.get('company') or 'Not provided')} | Location: {escape(job.get('location') or 'Not provided')} | Posted: {escape(job.get('posted_at') or job.get('discovered_at') or 'Unknown')}</div>
                         </article>""")
-        sections.append(f"<h2>{escape(category)} ({len(entries)})</h2>{''.join(cards)}")
+        sections.append(f'<h2 style="margin:32px 0 16px; padding-bottom:8px; border-bottom:2px solid #e2e8f0; color:#0f172a; font-size:16px; line-height:1.4; text-transform:uppercase; letter-spacing:.05em;">{escape(category)} ({len(entries)})</h2>{"".join(cards)}')
     subject = f"Swiss Job AI Agent: fallback job list ({len(jobs)} postings)"
     summary = (
         "These are the new job postings retrieved from jobs.ch and LinkedIn. "
@@ -800,7 +811,29 @@ def send_fallback_email(jobs):
     body = render_email(subject, summary, "".join(sections))
     send_html_email(subject, body)
 
-def main():
+def parse_main_args(argv=None):
+    parser = argparse.ArgumentParser(description="Run the Swiss Job AI Agent.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Send the result email without changing source mail, labels, or the real database/Sheet.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    global DATABASE_PATH, DRY_RUN
+    args = parse_main_args(argv)
+    DRY_RUN = args.dry_run
+    temporary_database = None
+    if DRY_RUN:
+        temporary_database = tempfile.TemporaryDirectory(prefix="swiss-job-ai-dry-run-")
+        snapshot_path = Path(temporary_database.name) / "jobs.sqlite3"
+        if DATABASE_PATH.is_file():
+            shutil.copy2(DATABASE_PATH, snapshot_path)
+        DATABASE_PATH = snapshot_path
+        print("🧪 Dry run: source mail, labels, real database, and Google Sheets will not be changed.")
+
     if config.AI_ENABLED and not config.GEMINI_API_KEY:
         print("❌ Error: GEMINI_API_KEY environment variable missing.")
         return

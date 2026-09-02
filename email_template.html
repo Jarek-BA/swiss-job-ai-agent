@@ -32,16 +32,16 @@
     @media (max-width: 600px) { body { padding: 0; } .content, .header { padding: 20px; } .job-header { display: block; } .badge { margin-top: 8px; } }
   </style>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Swiss Job AI Agent</h1>
-      <p class="intro">{{SUMMARY}}</p>
+<body style="margin:0; padding:20px 0; background:#f8fafc; color:#1e293b; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;">
+  <div class="container" style="width:100%; max-width:720px; margin:0 auto; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;">
+    <div class="header" style="background:#0f172a; color:#ffffff; padding:24px 32px;">
+      <h1 style="margin:0; font-size:22px; line-height:1.3; font-weight:700;">Swiss Job AI Agent</h1>
+      <p class="intro" style="margin:6px 0 0; color:#cbd5e1; font-size:14px; line-height:1.5;">{{SUMMARY}}</p>
     </div>
-    <div class="content">
+    <div class="content" style="padding:24px 32px;">
     {{JOB_SECTIONS}}
     </div>
-    <p class="footer">Generated from configured job alerts. Verify the original posting before applying.</p>
+    <p class="footer" style="margin:0; padding:20px 32px; background:#f8fafc; border-top:1px solid #e2e8f0; color:#94a3b8; font-size:12px; line-height:1.5; text-align:center;">Generated from configured job alerts. Verify the original posting before applying.</p>
   </div>
 </body>
 </html>

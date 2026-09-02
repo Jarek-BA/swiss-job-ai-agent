@@ -64,6 +64,14 @@ python -u main.py
 
 The first run may collect many postings and use several Gemini requests. Later runs skip URLs already stored in `jobs.sqlite3` and process only queued work.
 
+To send a test email without changing the source mailbox, moving or labeling alert emails, updating the real SQLite database, or writing to Google Sheets, run:
+
+```bash
+python -u main.py --dry-run
+```
+
+Dry-run mode reads alert messages with IMAP `BODY.PEEK`, processes a temporary copy of the local database, skips mailbox moves and Google Sheets synchronization, and still sends the resulting email. The outgoing message itself may appear in the sender account's Sent folder.
+
 ## GitHub Actions
 
 `.github/workflows/daily-job-agent.yml` runs the agent daily at 06:00 UTC. It can also be started manually from the **Actions** tab. Runs are serialized so two executions cannot update the SQLite queue at the same time.
