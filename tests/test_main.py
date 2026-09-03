@@ -121,6 +121,41 @@ class MainTests(unittest.TestCase):
 
         append.assert_not_called()
 
+    def test_dry_run_skips_job_archive_upload(self):
+        original_dry_run = main.DRY_RUN
+        self.addCleanup(setattr, main, "DRY_RUN", original_dry_run)
+        main.DRY_RUN = True
+        job = {"link": "https://jobs.ch/en/vacancies/detail/test"}
+
+        with mock.patch.object(main, "upload_job_description") as upload:
+            archive_uri = main.archive_job_description(job, "Description")
+
+        self.assertEqual(archive_uri, "")
+        upload.assert_not_called()
+
+    def test_detail_fetch_preserves_linkedin_markdown_structure(self):
+        page = mock.Mock()
+        page.content.return_value = """
+            <main>
+              <p>Sign in to access this job.</p>
+              <div class="show-more-less-html__markup">
+                <strong>Responsibilities<br/><br/></strong>
+                <ul><li>Manage orders and invoices.</li></ul>
+              </div>
+            </main>
+        """
+
+        description = main.fetch_job_detail_page(
+            page,
+            "https://www.linkedin.com/jobs/view/123",
+        )
+
+        self.assertEqual(
+            description,
+            "**Responsibilities**\n\n- Manage orders and invoices.",
+        )
+        self.assertNotIn("Sign in", description)
+
     def test_jobs_ch_parser_extracts_labeled_metadata_and_removes_location_from_title(self):
         message = EmailMessage()
         message.add_alternative(
@@ -301,7 +336,11 @@ class MainTests(unittest.TestCase):
         try:
             jobs = [
                 ({"link": "https://existing.example/job"}, evaluation),
-                ({"link": "https://new.example/job", "posted_at": "2026-08-31"}, evaluation),
+                ({
+                    "link": "https://new.example/job",
+                    "posted_at": "2026-08-31",
+                    "archive_uri": "gs://archive-bucket/jobs/example/abc.json",
+                }, evaluation),
             ]
             self.assertEqual(main.append_jobs_to_google_sheet(jobs), 1)
         finally:
@@ -309,8 +348,9 @@ class MainTests(unittest.TestCase):
             main.config.GOOGLE_SHEETS_CREDENTIALS_PATH = original_credentials_path
         row = sheet.append_rows.call_args.args[0][0]
         self.assertEqual(row[6], "https://new.example/job")
-        self.assertEqual(row[7:10], ["New", "", ""])
-        self.assertIn("Application strategy: Highlight Excel experience.", row[10])
+        self.assertIn("console.cloud.google.com/storage/browser/_details/archive-bucket/jobs/example/abc.json", row[7])
+        self.assertEqual(row[8:11], ["New", "", ""])
+        self.assertIn("Application strategy: Highlight Excel experience.", row[11])
 
     def test_sort_matches_orders_highest_score_first(self):
         first = main.SingleJobEvaluation(

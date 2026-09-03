@@ -21,6 +21,7 @@ from google import genai
 from google.genai import types
 
 import config
+from src.services.job_archive import archive_job_description as upload_job_description
 
 MAX_JOBS_PER_BATCH = 15
 MAX_SCREENING_BATCH = 30
@@ -36,12 +37,37 @@ JOB_CATEGORIES = (
 )
 DRY_RUN = False
 
+
+def archive_job_description(job, description):
+    if DRY_RUN:
+        return ""
+    return upload_job_description(job, description)
+
 def clean_job_text(text):
     text = re.sub(r"\bContract type:\s*Permanent position\b", "", text, flags=re.I)
     text = re.sub(r"\bNew\s+Is this job relevant to you\?", "", text, flags=re.I)
     text = re.sub(r"Is this job relevant to you\?", "", text, flags=re.I)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+def format_detail_content(content):
+    block_tags = {"h1", "h2", "h3", "p", "li", "strong"}
+    blocks = []
+    for element in content.find_all(list(block_tags)):
+        if any(parent.name in block_tags for parent in element.parents):
+            continue
+        text = clean_job_text(element.get_text(" ", strip=True))
+        if not text:
+            continue
+        if element.name == "li":
+            blocks.append(f"- {text}")
+        elif element.name in {"h1", "h2", "h3"}:
+            blocks.append(f"{'#' * int(element.name[-1])} {text}")
+        elif element.name == "strong":
+            blocks.append(f"**{text}**")
+        else:
+            blocks.append(text)
+    return "\n\n".join(blocks)
 
 def clean_jobs_ch_title(title):
     title = re.sub(r"^\s*(?:Today|Yesterday|\d+\s+hours?\s+ago)\s*", "", title, flags=re.I)
@@ -112,6 +138,7 @@ def initialise_database():
                 location TEXT,
                 posted_at TEXT,
                 description TEXT,
+                archive_uri TEXT,
                 status TEXT NOT NULL DEFAULT 'discovered',
                 screening TEXT,
                 evaluation TEXT,
@@ -135,7 +162,7 @@ def initialise_database():
             connection.execute("ALTER TABLE jobs ADD COLUMN fallback_notified_at TEXT")
         for column, definition in (("source", "TEXT NOT NULL DEFAULT 'jobs.ch'"),
                                    ("company", "TEXT"), ("location", "TEXT"),
-                                   ("posted_at", "TEXT")):
+                                   ("posted_at", "TEXT"), ("archive_uri", "TEXT")):
             if column not in columns:
                 connection.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
         rows = connection.execute(
@@ -166,19 +193,20 @@ def save_alert_jobs(jobs):
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.executemany(
                         """INSERT OR IGNORE INTO jobs
-                             (link, title, source, company, location, posted_at, description, status)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, 'ready')
+                             (link, title, source, company, location, posted_at, description, archive_uri, status)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'discovered')
                ON CONFLICT(link) DO UPDATE SET
                    title = CASE WHEN excluded.title != '' THEN excluded.title ELSE jobs.title END,
                                      source = excluded.source,
                                      company = COALESCE(excluded.company, jobs.company),
                                      location = COALESCE(excluded.location, jobs.location),
                                      posted_at = COALESCE(excluded.posted_at, jobs.posted_at),
-                   description = CASE WHEN jobs.description IS NULL OR jobs.description = ''
-                                      THEN excluded.description ELSE jobs.description END""",
+                                     description = CASE WHEN jobs.description IS NULL OR jobs.description = ''
+                                      THEN excluded.description ELSE jobs.description END,
+                                     status = CASE WHEN jobs.archive_uri IS NULL THEN 'discovered' ELSE jobs.status END""",
                         [(job["link"], job["title"], job.get("source", "jobs.ch"),
                             job.get("company"), job.get("location"), job.get("posted_at"),
-                            job["description"]) for job in jobs],
+                            job["description"], None) for job in jobs],
         )
 
 def email_was_processed(mailbox, uid):
@@ -227,7 +255,7 @@ def get_jobs_by_status(*statuses):
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
-            "SELECT link, title, source, company, location, posted_at, description, status, screening FROM jobs "
+            "SELECT link, title, source, company, location, posted_at, description, archive_uri, status, screening FROM jobs "
             f"WHERE status IN ({placeholders}) ORDER BY discovered_at",
             statuses,
         ).fetchall()
@@ -251,10 +279,11 @@ def mark_fallback_notified(jobs):
         )
 
 def save_job_description(job, description):
+    archive_uri = archive_job_description(job, description)
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.execute(
-            "UPDATE jobs SET description = ?, status = 'ready' WHERE link = ?",
-            (description, job["link"]),
+            "UPDATE jobs SET description = ?, archive_uri = ?, status = 'ready' WHERE link = ?",
+            (description, archive_uri, job["link"]),
         )
 
 def mark_details_failed(job):
@@ -298,7 +327,7 @@ def get_evaluated_matches():
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
-            "SELECT link, title, description, evaluation FROM jobs "
+            "SELECT link, title, description, archive_uri, evaluation FROM jobs "
             "WHERE status = 'evaluated'"
         ).fetchall()
     for row in rows:
@@ -531,16 +560,42 @@ def fetch_job_detail_page(page, job_url):
         page.goto(job_url, wait_until="domcontentloaded", timeout=15000)
         soup = BeautifulSoup(page.content(), "html.parser")
 
-        content = soup.find("main") or soup.find("article") or soup
+        content = (
+            soup.select_one(".show-more-less-html__markup")
+            or soup.select_one(".description__text")
+            or soup.find("main")
+            or soup.find("article")
+            or soup
+        )
         for element in content.find_all(["script", "style", "nav", "footer"]):
             element.decompose()
 
-        paragraphs = content.find_all(["p", "li", "h1", "h2", "h3"])
-        text = " ".join(element.get_text(" ", strip=True) for element in paragraphs)
-        return clean_job_text(text)[:MAX_DESCRIPTION_CHARS]
+        return format_detail_content(content)
     except Exception as e:
         print(f"   ⚠️ Could not fetch detail: {e}")
         return ""
+
+
+def fetch_and_save_job_details(jobs):
+    if not jobs:
+        return
+    print(f"\n📄 Fetching details for {len(jobs)} new postings...")
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
+        try:
+            page = context.new_page()
+            for job in jobs:
+                description = fetch_job_detail_page(page, job["link"])
+                if description:
+                    job["description"] = description
+                    save_job_description(job, description)
+                else:
+                    mark_details_failed(job)
+        finally:
+            browser.close()
 
 def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvaluation:
     """Evaluates ALL jobs in 1 SINGLE API call to stay within daily quotas."""
@@ -551,7 +606,7 @@ def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvalua
         formatted_jobs_text += f"Company: {job.get('company') or 'Not provided'}\n"
         formatted_jobs_text += f"Location: {job.get('location') or 'Not provided'}\n"
         formatted_jobs_text += f"Posted: {job.get('posted_at') or 'Unknown'}\n"
-        formatted_jobs_text += f"Description: {job['description']}\n"
+        formatted_jobs_text += f"Description: {job['description'][:MAX_DESCRIPTION_CHARS]}\n"
 
     prompt = f"""
     You are an expert Swiss career advisor. Evaluate the following {len(jobs_list)} job listings for the candidate.
@@ -595,7 +650,7 @@ def evaluate_jobs_screening(client: genai.Client, jobs_list: list) -> BatchScree
         f"Company: {job.get('company') or 'Not provided'}\n"
         f"Location: {job.get('location') or 'Not provided'}\n"
         f"Posted: {job.get('posted_at') or 'Unknown'}\n"
-        f"Description: {job['description']}\n"
+        f"Description: {job['description'][:MAX_DESCRIPTION_CHARS]}\n"
         for index, job in enumerate(jobs_list, start=1)
     )
     prompt = f"""
@@ -680,6 +735,16 @@ def get_gspread_client():
     )
     return gspread.authorize(credentials)
 
+def archive_console_url(archive_uri):
+    if not archive_uri or not archive_uri.startswith("gs://"):
+        return ""
+    bucket_and_object = archive_uri[5:]
+    bucket, object_name = bucket_and_object.split("/", 1)
+    return (
+        "https://console.cloud.google.com/storage/browser/_details/"
+        f"{bucket}/{object_name}?project={config.GOOGLE_CLOUD_PROJECT}"
+    )
+
 def append_jobs_to_google_sheet(jobs_with_eval: list) -> int:
     """Append evaluated jobs to the tracking sheet without duplicating links."""
     if not jobs_with_eval or not Path(config.GOOGLE_SHEETS_CREDENTIALS_PATH).is_file():
@@ -708,6 +773,7 @@ def append_jobs_to_google_sheet(jobs_with_eval: list) -> int:
             categorise_job(eval_data.job_title),
             f"{eval_data.match_score}%",
             job_link,
+            archive_console_url(job.get("archive_uri")),
             "New",
             "",
             "",
@@ -866,6 +932,11 @@ def main(argv=None):
           f"{len(pending_jobs)} need details, "
           f"{len(ready_jobs)} need screening, {len(screened_jobs)} await detailed evaluation.")
 
+    fetch_and_save_job_details(pending_jobs)
+    pending_jobs = get_pending_jobs()
+    ready_jobs = get_ready_jobs()
+    screened_jobs = get_screened_jobs()
+
     if not pending_jobs and not ready_jobs and not screened_jobs:
         matches = get_evaluated_matches()
         if matches:
@@ -895,24 +966,6 @@ def main(argv=None):
         else:
             print("ℹ️ AI disabled: no unnotified postings to send.")
         return
-
-    print(f"\n📄 Step 2: Fetching details for {len(pending_jobs)} new postings...")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36"
-        )
-        try:
-            page = context.new_page()
-            for job in pending_jobs:
-                desc = fetch_job_detail_page(page, job['link'])
-                if desc:
-                    job['description'] = desc
-                    save_job_description(job, desc)
-                else:
-                    mark_details_failed(job)
-        finally:
-            browser.close()
 
     ready_jobs = get_ready_jobs()
     print(f"\n⚡ Step 3: Screening {len(ready_jobs)} postings in batches of {MAX_SCREENING_BATCH}...")

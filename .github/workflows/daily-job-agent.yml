@@ -35,6 +35,8 @@ env:
   GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID || '1wm3GIHo1HGwYJfkU1Yotcg6wb_gKP3hlZMVkSYdTv-I' }}
   GOOGLE_SHEETS_CREDENTIALS_PATH: google-service-account.json
   GOOGLE_SHEETS_CREDENTIALS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
+  GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+  JOB_ARCHIVE_BUCKET: ${{ vars.JOB_ARCHIVE_BUCKET || 'swiss_jobs_db' }}
 
 jobs:
   run-agent:

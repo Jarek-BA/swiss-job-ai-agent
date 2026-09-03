@@ -6,7 +6,7 @@ An automated Swiss job scout for administrative and back-office roles in Canton 
 
 1. Gmail IMAP reads new LinkedIn and jobs.ch alert emails.
 2. Job URLs are deduplicated and stored in `jobs.sqlite3`.
-3. New postings are opened once with Playwright and their detail text is saved locally when AI evaluation is enabled.
+3. New postings are opened once with Playwright and their detail text is saved locally and archived in Cloud Storage when configured.
 4. Gemini performs a compact screening pass, up to 30 postings per request.
 5. Only potential matches are sent to detailed evaluation, in batches of 15.
 6. Matches scoring at least 70% are sent by email and marked as `emailed`, highest scores first.
@@ -49,6 +49,8 @@ LINKEDIN_PROCESSED_FOLDER=LinkedIn/Processed
 SENDER_EMAIL=your_gmail_address
 SENDER_PASSWORD=your_gmail_app_password
 RECEIVER_EMAIL=recipient_address
+GOOGLE_CLOUD_PROJECT=your_google_cloud_project_id
+JOB_ARCHIVE_BUCKET=your_private_bucket_name
 ```
 
 For Gmail, `SENDER_PASSWORD` should be an App Password, not the normal account password.
@@ -89,7 +91,7 @@ PRIVATE_CONFIG_REPO_TOKEN
 GOOGLE_SHEETS_CREDENTIALS_JSON
 ```
 
-The workflow appends evaluated matches to the configured Google Sheet. Share the sheet with the service account email as an Editor, and store the downloaded service-account JSON as the `GOOGLE_SHEETS_CREDENTIALS_JSON` secret. Existing links are checked in column G before rows are appended. Columns H-J (`Status`, `Applied Date`, and `Application Notes`) are left for manual updates in the sheet.
+The workflow appends evaluated matches to the configured Google Sheet. Share the sheet with the service account email as an Editor, and store the downloaded service-account JSON as the `GOOGLE_SHEETS_CREDENTIALS_JSON` secret. Existing links are checked in column G before rows are appended. Column H (`Description Archive`) links to the private archived JSON in Google Cloud Console when available. Columns I-K (`Status`, `Applied Date`, and `Application Notes`) are left for manual updates in the sheet.
 
 The workflow validates these secrets before running. An empty value is not reported to the log, but the job will stop with the missing-secret names and setup location.
 
@@ -108,6 +110,8 @@ AI_ENABLED
 Jobs.ch alerts are read from both `jobmail@jobs.ch` and `info@jobs.ch` by default. Set `JOBS_CH_ALERT_SENDERS` to a comma-separated list if the sender addresses change. Imported postings follow the same parsing, deduplication, AI evaluation, email, and Google Sheets tracking flow.
 
 The local candidate profile and preferences are maintained as Markdown files in the private `personal-ai-agent-config/swiss-job-ai-agent/` repository. GitHub Actions checks out that repository using a read-only `PRIVATE_CONFIG_REPO_TOKEN`; candidate text does not need to be duplicated into GitHub Secrets. Do not commit private candidate data to this public repository.
+
+Job descriptions are fetched from the actual posting page, not copied from the alert email, and archived as private JSON objects in Cloud Storage when `JOB_ARCHIVE_BUCKET` is configured. LinkedIn pages use their dedicated public description markup when available, excluding sign-in prompts and page chrome. The existing service-account JSON needs `roles/storage.objectAdmin` on that bucket. The default GitHub Actions bucket is `swiss_jobs_db`; set the `JOB_ARCHIVE_BUCKET` and `GOOGLE_CLOUD_PROJECT` repository variables if these differ. Objects are keyed by a SHA-256 hash of the canonical posting URL, so a later CV workflow can retrieve the description without scraping the posting again. Dry-run mode does not upload archive objects.
 
 ## Tailored CV Generation
 
