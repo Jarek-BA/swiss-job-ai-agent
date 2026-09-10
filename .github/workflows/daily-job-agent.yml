@@ -37,6 +37,8 @@ env:
   GOOGLE_SHEETS_CREDENTIALS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
   GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
   JOB_ARCHIVE_BUCKET: ${{ vars.JOB_ARCHIVE_BUCKET || 'swiss_jobs_db' }}
+  FIRESTORE_ENABLED: yes
+  FIRESTORE_COLLECTION: ${{ vars.FIRESTORE_COLLECTION || 'jobs' }}
 
 jobs:
   run-agent:
@@ -96,20 +98,5 @@ jobs:
             exit 1
           fi
 
-      - name: Restore job database
-        uses: actions/cache/restore@v4
-        with:
-          path: jobs.sqlite3
-          key: jobs-db-${{ github.run_id }}
-          restore-keys: |
-            jobs-db-
-
       - name: Run job agent
         run: python -u main.py
-
-      - name: Save job database
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: jobs.sqlite3
-          key: jobs-db-${{ github.run_id }}

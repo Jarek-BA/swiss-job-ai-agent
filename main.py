@@ -6,6 +6,7 @@ import email
 import shutil
 import tempfile
 import argparse
+import time
 from datetime import date
 from html import escape
 from email.header import decode_header
@@ -22,11 +23,13 @@ from google.genai import types
 
 import config
 from src.services.job_archive import archive_job_description as upload_job_description
+from src.services.job_store import FirestoreJobStore
 
 MAX_JOBS_PER_BATCH = 15
 MAX_SCREENING_BATCH = 30
 SCREENING_THRESHOLD = 60
 MAX_DESCRIPTION_CHARS = 2500
+AI_MAX_ATTEMPTS = 3
 DATABASE_PATH = Path(__file__).with_name("jobs.sqlite3")
 EMAIL_TEMPLATE_PATH = Path(__file__).with_name("email_template.html")
 JOB_CATEGORIES = (
@@ -36,6 +39,11 @@ JOB_CATEGORIES = (
     "Business Support, Sales Ops & Data",
 )
 DRY_RUN = False
+JOB_STORE = None
+
+
+def use_firestore():
+    return JOB_STORE is not None
 
 
 def archive_job_description(job, description):
@@ -128,6 +136,15 @@ class BatchScreeningEvaluation(BaseModel):
     evaluations: List[ScreeningEvaluation]
 
 def initialise_database():
+    global JOB_STORE
+    if config.FIRESTORE_ENABLED and not DRY_RUN:
+        JOB_STORE = FirestoreJobStore(
+            project_id=config.GOOGLE_CLOUD_PROJECT,
+            credentials_path=config.GOOGLE_SHEETS_CREDENTIALS_PATH,
+            collection=config.FIRESTORE_COLLECTION,
+        )
+        JOB_STORE.initialise(parse_jobs_ch_alert_metadata)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
@@ -179,6 +196,9 @@ def initialise_database():
             )
 
 def save_discovered_jobs(jobs):
+    if use_firestore():
+        JOB_STORE.save_discovered_jobs(jobs)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.executemany(
             "INSERT OR IGNORE INTO jobs (link, title, source) VALUES (?, ?, ?)",
@@ -190,6 +210,9 @@ def save_alert_jobs(jobs):
         normalise_jobs_ch_alert_job(job) if job.get("source", "jobs.ch") == "jobs.ch" else job
         for job in jobs
     ]
+    if use_firestore():
+        JOB_STORE.save_alert_jobs(jobs, lambda job: job)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.executemany(
                         """INSERT OR IGNORE INTO jobs
@@ -210,6 +233,8 @@ def save_alert_jobs(jobs):
         )
 
 def email_was_processed(mailbox, uid):
+    if use_firestore():
+        return JOB_STORE.email_was_processed(mailbox, uid)
     with sqlite3.connect(DATABASE_PATH) as connection:
         return connection.execute(
             "SELECT 1 FROM processed_emails WHERE mailbox = ? AND uid = ?",
@@ -217,6 +242,9 @@ def email_was_processed(mailbox, uid):
         ).fetchone() is not None
 
 def mark_email_processed(mailbox, uid):
+    if use_firestore():
+        JOB_STORE.mark_email_processed(mailbox, uid)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.execute(
             "INSERT OR IGNORE INTO processed_emails (mailbox, uid) VALUES (?, ?)",
@@ -251,6 +279,8 @@ def get_screened_jobs():
     return get_jobs_by_status("screened")
 
 def get_jobs_by_status(*statuses):
+    if use_firestore():
+        return JOB_STORE.jobs_by_status(*statuses)
     placeholders = ",".join("?" for _ in statuses)
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.row_factory = sqlite3.Row
@@ -262,6 +292,8 @@ def get_jobs_by_status(*statuses):
     return [dict(row) for row in rows]
 
 def get_fallback_jobs():
+    if use_firestore():
+        return JOB_STORE.fallback_jobs()
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
@@ -272,6 +304,9 @@ def get_fallback_jobs():
     return [dict(row) for row in rows]
 
 def mark_fallback_notified(jobs):
+    if use_firestore():
+        JOB_STORE.mark_fallback_notified(jobs)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.executemany(
             "UPDATE jobs SET fallback_notified_at = CURRENT_TIMESTAMP WHERE link = ?",
@@ -280,6 +315,9 @@ def mark_fallback_notified(jobs):
 
 def save_job_description(job, description):
     archive_uri = archive_job_description(job, description)
+    if use_firestore():
+        JOB_STORE.save_job_description(job, description, archive_uri)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.execute(
             "UPDATE jobs SET description = ?, archive_uri = ?, status = 'ready' WHERE link = ?",
@@ -287,6 +325,9 @@ def save_job_description(job, description):
         )
 
 def mark_details_failed(job):
+    if use_firestore():
+        JOB_STORE.mark_details_failed(job)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.execute(
             "UPDATE jobs SET status = 'details_failed' WHERE link = ?",
@@ -294,6 +335,9 @@ def mark_details_failed(job):
         )
 
 def save_evaluations(jobs, batch_eval):
+    if use_firestore():
+        JOB_STORE.save_evaluations(jobs, batch_eval)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         for eval_item in batch_eval.evaluations:
             index = eval_item.job_index - 1
@@ -305,6 +349,9 @@ def save_evaluations(jobs, batch_eval):
                 )
 
 def save_screening(jobs, batch_screening):
+    if use_firestore():
+        JOB_STORE.save_screening(jobs, batch_screening)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         for screening in batch_screening.evaluations:
             index = screening.job_index - 1
@@ -316,6 +363,9 @@ def save_screening(jobs, batch_screening):
                 )
 
 def mark_emailed(jobs):
+    if use_firestore():
+        JOB_STORE.mark_emailed(jobs)
+        return
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.executemany(
             "UPDATE jobs SET status = 'emailed' WHERE link = ?",
@@ -324,6 +374,13 @@ def mark_emailed(jobs):
 
 def get_evaluated_matches():
     matches = []
+    if use_firestore():
+        rows = JOB_STORE.evaluated_jobs()
+        for row in rows:
+            evaluation = SingleJobEvaluation.model_validate_json(row["evaluation"])
+            if evaluation.is_relevant and evaluation.match_score >= 70:
+                matches.append((row, evaluation))
+        return matches
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
@@ -586,16 +643,40 @@ def fetch_and_save_job_details(jobs):
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         try:
-            page = context.new_page()
             for job in jobs:
-                description = fetch_job_detail_page(page, job["link"])
-                if description:
-                    job["description"] = description
-                    save_job_description(job, description)
-                else:
-                    mark_details_failed(job)
+                page = context.new_page()
+                try:
+                    description = fetch_job_detail_page(page, job["link"])
+                    if description:
+                        job["description"] = description
+                        save_job_description(job, description)
+                    else:
+                        mark_details_failed(job)
+                finally:
+                    page.close()
         finally:
             browser.close()
+
+
+def is_retryable_ai_error(error):
+    message = str(error).upper()
+    return any(code in message for code in ("429", "500", "502", "503", "504", "INTERNAL"))
+
+
+def generate_content_with_retry(client, *, model, contents, config):
+    for attempt in range(AI_MAX_ATTEMPTS):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except Exception as error:
+            if not is_retryable_ai_error(error) or attempt == AI_MAX_ATTEMPTS - 1:
+                raise
+            delay = 2 ** attempt
+            print(f"   Gemini request failed ({error}); retrying in {delay}s...")
+            time.sleep(delay)
 
 def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvaluation:
     """Evaluates ALL jobs in 1 SINGLE API call to stay within daily quotas."""
@@ -633,7 +714,8 @@ def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvalua
         "summary and pros concise but still evidence-based and provide a brief actionable tip."
     )
 
-    response = client.models.generate_content(
+    response = generate_content_with_retry(
+        client,
         model=config.GEMINI_MODEL,
         contents=prompt,
         config=types.GenerateContentConfig(
@@ -672,7 +754,8 @@ def evaluate_jobs_screening(client: genai.Client, jobs_list: list) -> BatchScree
     LISTINGS:
     {listings}
     """
-    response = client.models.generate_content(
+    response = generate_content_with_retry(
+        client,
         model=config.GEMINI_MODEL,
         contents=prompt,
         config=types.GenerateContentConfig(
@@ -932,7 +1015,8 @@ def main(argv=None):
           f"{len(pending_jobs)} need details, "
           f"{len(ready_jobs)} need screening, {len(screened_jobs)} await detailed evaluation.")
 
-    fetch_and_save_job_details(pending_jobs)
+    if config.AI_ENABLED:
+        fetch_and_save_job_details(pending_jobs)
     pending_jobs = get_pending_jobs()
     ready_jobs = get_ready_jobs()
     screened_jobs = get_screened_jobs()
