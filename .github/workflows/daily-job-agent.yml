@@ -98,24 +98,5 @@ jobs:
             exit 1
           fi
 
-      - name: Restore job database
-        uses: actions/cache/restore@v4
-        with:
-          path: jobs.sqlite3
-          key: jobs-db-${{ github.run_id }}
-          restore-keys: |
-            jobs-db-
-
-      - name: Migrate cached job database to Firestore
-        if: ${{ hashFiles('jobs.sqlite3') != '' }}
-        run: python migrate_sqlite_to_firestore.py --project "$GOOGLE_CLOUD_PROJECT"
-
       - name: Run job agent
         run: python -u main.py
-
-      - name: Save job database
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: jobs.sqlite3
-          key: jobs-db-${{ github.run_id }}
