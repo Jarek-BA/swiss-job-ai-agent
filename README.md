@@ -51,6 +51,8 @@ SENDER_PASSWORD=your_gmail_app_password
 RECEIVER_EMAIL=recipient_address
 GOOGLE_CLOUD_PROJECT=your_google_cloud_project_id
 JOB_ARCHIVE_BUCKET=your_private_bucket_name
+FIRESTORE_ENABLED=yes
+FIRESTORE_COLLECTION=jobs
 ```
 
 For Gmail, `SENDER_PASSWORD` should be an App Password, not the normal account password.
@@ -135,7 +137,18 @@ python generate_cv.py --text "Job description..." --format pdf --output tailored
 
 Google Slides output replaces `{{COMPANY}}`, `{{JOB_TITLE}}`, `{{TAILORED_SUMMARY}}`, `{{KEY_SKILLS}}`, `{{EXPERIENCE_HIGHLIGHTS}}`, and `{{COVER_LETTER_INTRO}}` in the copied presentation and grants `USER_EMAIL` Editor access. The private PDF template is `personal-ai-agent-config/swiss-job-ai-agent/cv_template.html`. The generated PDF and service-account JSON are ignored by Git.
 
-The workflow caches `jobs.sqlite3` between runs because GitHub-hosted runners are temporary. The cache is not a permanent backup; export or replace the persistence layer before relying on the history for long-term retention.
+Operational job state is stored in Firestore when `FIRESTORE_ENABLED=yes`. Cloud Storage stores the archived job descriptions; it is not used as a live SQLite database. The first Firestore-enabled workflow run imports any legacy `jobs.sqlite3` restored from the Actions cache. After that migration succeeds, the cache restore/save steps can be removed from the workflow.
+
+### Firestore setup
+
+Before enabling the workflow, create or select the Google Cloud project and enable
+the Firestore API. Create a Firestore database in Native mode, then grant the
+service account used by `GOOGLE_SHEETS_CREDENTIALS_JSON` the `Cloud Datastore User`
+role (`roles/datastore.user`) on that project. Set the GitHub Actions variable
+`GOOGLE_CLOUD_PROJECT` to the project ID; this is required even when the same
+service account is already used for Cloud Storage. The first workflow run keeps
+the legacy cache restore only long enough to migrate its SQLite state. Confirm
+the migration log before removing the cache restore/save steps.
 
 ## Tests
 
@@ -155,4 +168,4 @@ Playwright is used only to enrich alert postings with detail-page text when AI e
 
 ## Local State
 
-`jobs.sqlite3` contains discovered postings, extracted descriptions, screening results, detailed evaluations, and processing statuses. Back it up if the processing history should be preserved. Delete it only if all postings should be treated as new again.
+With Firestore enabled, the `jobs` collection contains discovered postings, extracted descriptions, screening results, detailed evaluations, and processing statuses. The `processed_emails` collection stores imported mailbox UIDs. Run `python migrate_sqlite_to_firestore.py --project YOUR_PROJECT_ID` once to migrate a local SQLite database; the workflow performs the same migration for its legacy cache during the transition.

@@ -37,6 +37,8 @@ env:
   GOOGLE_SHEETS_CREDENTIALS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
   GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
   JOB_ARCHIVE_BUCKET: ${{ vars.JOB_ARCHIVE_BUCKET || 'swiss_jobs_db' }}
+  FIRESTORE_ENABLED: yes
+  FIRESTORE_COLLECTION: ${{ vars.FIRESTORE_COLLECTION || 'jobs' }}
 
 jobs:
   run-agent:
@@ -103,6 +105,10 @@ jobs:
           key: jobs-db-${{ github.run_id }}
           restore-keys: |
             jobs-db-
+
+      - name: Migrate cached job database to Firestore
+        if: ${{ hashFiles('jobs.sqlite3') != '' }}
+        run: python migrate_sqlite_to_firestore.py --project "$GOOGLE_CLOUD_PROJECT"
 
       - name: Run job agent
         run: python -u main.py

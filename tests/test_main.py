@@ -11,10 +11,13 @@ class MainTests(unittest.TestCase):
     def setUp(self):
         self.temp_directory = tempfile.TemporaryDirectory()
         self.original_database_path = main.DATABASE_PATH
+        self.original_firestore_enabled = main.config.FIRESTORE_ENABLED
+        main.config.FIRESTORE_ENABLED = False
         main.DATABASE_PATH = Path(self.temp_directory.name) / "jobs.sqlite3"
         main.initialise_database()
 
     def tearDown(self):
+        main.config.FIRESTORE_ENABLED = self.original_firestore_enabled
         main.DATABASE_PATH = self.original_database_path
         self.temp_directory.cleanup()
 
