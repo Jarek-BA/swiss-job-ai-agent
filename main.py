@@ -28,6 +28,7 @@ from src.services.job_store import FirestoreJobStore
 MAX_JOBS_PER_BATCH = 15
 MAX_SCREENING_BATCH = 30
 SCREENING_THRESHOLD = 60
+MATCH_THRESHOLD = 60
 MAX_DESCRIPTION_CHARS = 2500
 AI_MAX_ATTEMPTS = 3
 DATABASE_PATH = Path(__file__).with_name("jobs.sqlite3")
@@ -378,7 +379,7 @@ def get_evaluated_matches():
         rows = JOB_STORE.evaluated_jobs()
         for row in rows:
             evaluation = SingleJobEvaluation.model_validate_json(row["evaluation"])
-            if evaluation.is_relevant and evaluation.match_score >= 70:
+            if evaluation.is_relevant and evaluation.match_score >= MATCH_THRESHOLD:
                 matches.append((row, evaluation))
         return matches
     with sqlite3.connect(DATABASE_PATH) as connection:
@@ -389,7 +390,7 @@ def get_evaluated_matches():
         ).fetchall()
     for row in rows:
         evaluation = SingleJobEvaluation.model_validate_json(row["evaluation"])
-        if evaluation.is_relevant and evaluation.match_score >= 70:
+        if evaluation.is_relevant and evaluation.match_score >= MATCH_THRESHOLD:
             matches.append((dict(row), evaluation))
     return matches
 
@@ -495,11 +496,40 @@ def extract_jobs_ch_alert_links(message):
                 if link not in jobs_by_link or len(title) > len(jobs_by_link[link][0]):
                     jobs_by_link[link] = candidate
     return list(jobs_by_link.items())
+def extract_joobly_alert_links(message):
+    jobs_by_link = {}
+    for part in message.walk() if message.is_multipart() else [message]:
+        if part.get_content_type() != "text/html":
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        html = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+        soup = BeautifulSoup(html, "html.parser")
+        for anchor in soup.find_all("a", href=True):
+            href = anchor["href"]
+            if "jooble" not in urlsplit(href).netloc.lower():
+                continue
+            link = canonicalise_link(href)
+            title = anchor.get_text(" ", strip=True)
+            if (
+                not link
+                or not title
+                or link in jobs_by_link
+                or re.search(r"unsubscribe|preferences|manage-alert", href, re.I)
+                or re.search(r"unsubscribe|preferences|manage alerts", title, re.I)
+            ):
+                continue
+            jobs_by_link[link] = clean_joobly_title(title)
+    return list(jobs_by_link.items())
 
 def canonicalise_link(link):
     parts = urlsplit(link)
     path = parts.path.replace("/comm/jobs/", "/jobs/").rstrip("/")
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+def clean_joobly_title(title):
+    return re.split(r"\s+(?:✅|💼)", title, maxsplit=1)[0].strip()
 
 def import_linkedin_alerts():
     if not config.LINKEDIN_ALERT_EMAIL or not config.LINKEDIN_ALERT_PASSWORD:
@@ -610,6 +640,54 @@ def import_jobs_ch_alerts():
             mark_email_processed(mailbox_name, uid)
             imported += len(jobs)
     return imported
+def import_joobly_alerts():
+    if not config.LINKEDIN_ALERT_EMAIL or not config.LINKEDIN_ALERT_PASSWORD:
+        return 0
+
+    imported = 0
+    imported_links = set()
+    mailbox_name = config.LINKEDIN_ALERT_EMAIL
+    print("📬 Reading Joobly alert emails...")
+    with imaplib.IMAP4_SSL("imap.gmail.com") as mailbox:
+        mailbox.login(mailbox_name, config.LINKEDIN_ALERT_PASSWORD)
+        mailbox.select("INBOX", readonly=DRY_RUN)
+        alert_uids = set()
+        for sender in config.JOOBLY_ALERT_SENDERS:
+            result, data = mailbox.uid("search", None, "UNSEEN", "FROM", sender)
+            if result != "OK":
+                raise RuntimeError(f"Could not search Joobly alerts from {sender}")
+            alert_uids.update(data[0].split())
+
+        for uid_bytes in sorted(alert_uids, key=lambda value: int(value)):
+            uid = uid_bytes.decode("ascii")
+            if email_was_processed(mailbox_name, uid):
+                continue
+            fetch_command = "(BODY.PEEK[])" if DRY_RUN else "(RFC822)"
+            result, message_data = mailbox.uid("fetch", uid, fetch_command)
+            if result != "OK":
+                continue
+            raw_message = next(
+                (item[1] for item in message_data if isinstance(item, tuple)), None
+            )
+            if not raw_message:
+                continue
+            message = email.message_from_bytes(raw_message)
+            text = extract_email_text(message)
+            jobs = [
+                {
+                    "link": link,
+                    "title": title or decode_email_header(message.get("Subject")) or "Joobly job alert",
+                    "source": "joobly",
+                    "description": text[:MAX_DESCRIPTION_CHARS],
+                }
+                for link, title in extract_joobly_alert_links(message)
+            ]
+            save_alert_jobs(jobs)
+            move_email_to_processed_folder(mailbox, uid)
+            mark_email_processed(mailbox_name, uid)
+            imported_links.update(job["link"] for job in jobs)
+            imported = len(imported_links)
+    return imported
 
 def fetch_job_detail_page(page, job_url):
     """Extracts description text from detail page."""
@@ -704,8 +782,44 @@ def evaluate_jobs_batch(client: genai.Client, jobs_list: list) -> BatchJobEvalua
 
     system_instruction = (
         "Evaluate each job listing independently and return an array for ALL jobs provided. "
-        "Ensure job_index maps strictly to [1], [2], etc. Calibrate scores consistently: "
-        "consider role fit, transferable experience, workload, language, exclusions, and location. "
+        "Ensure job_index maps strictly to [1], [2], etc. Be conservative and evidence-based: "
+        "do not infer qualifications, certifications, language ability, or duties that are not "
+        "supported by the profile or listing. Calibrate scores consistently: consider role fit, "
+        "transferable experience, workload, language, exclusions, certification requirements, "
+        "and location. A score of 70+ must mean a genuinely strong and realistic application, "
+        "not merely a broadly related title. Use these anchors: 85-100 exceptional direct fit "
+        "and uncommon; 70-84 strong fit with no major unresolved requirement; 60-69 plausible "
+        "adjacent or somewhat underqualified fit worth considering; 40-59 substantial gaps or "
+        "a stretch; 0-39 poor fit or an exclusion. Explicitly required Swiss-issued diplomas, "
+        "certificates, licenses, or regulated credentials that the candidate does not have are "
+        "major gaps and normally cap the score at 59. If such a credential is only preferred, "
+        "an asset, or one of several equivalent options, penalize it but do not apply the cap. "
+        "Treat an explicitly required completed vocational apprenticeship or trade qualification "
+        "as a major non-compensable gap when it is absent from the profile. This includes German "
+        "or Swiss wording such as 'abgeschlossene Berufslehre', 'abgeschlossene Lehre', 'Lehre', "
+        "'EFZ', 'EBA', or 'Berufslehre'. If the listing does not explicitly allow equivalent "
+        "experience or alternative qualifications, such a missing mandatory apprenticeship should "
+        "normally cap the score at 39 and make the job not relevant, even when the candidate has "
+        "related practical experience. Do not treat general office experience, a university "
+        "degree in another field, or transferable skills as a substitute unless the listing says "
+        "they are accepted. "
+        "Before assigning the score, compare every stated requirement against the profile: "
+        "core discipline, education, years and type of experience, tools or methods, language, "
+        "and mandatory credentials. If the candidate lacks most of the core requirements, "
+        "especially the core discipline and required experience, score 0-39 even when one "
+        "minor duty or keyword overlaps. Do not equate invoice processing, financial analysis, "
+        "internal audit, or general administration with business engineering, product ownership, "
+        "agile delivery, SAFe, IREB, or stakeholder-management experience unless the profile "
+        "explicitly proves that experience. German B2 is not evidence of very good or fluent "
+        "German. Use transferable skills to explain residual potential, not to erase missing "
+        "core qualifications. For hospitality roles, consider hotel reception, front office, "
+        "reservations, guest services, hotel administration, and hotel back-office roles when "
+        "the duties match the candidate's service, administrative, payment, reporting, or "
+        "customer-support experience. Prefer regular daytime schedules. Penalize night audit, "
+        "overnight reception, rotating shifts, and roles requiring frequent weekends or public "
+        "holidays; an otherwise similar night role should score lower than a daytime role. "
+        "Prefer realistic junior, assistant, coordinator, clerk, back-office, support, and "
+        "transferable-skill roles over inflated matches to senior or credential-gated roles. "
         "For location, estimate practical commute relevance from Wetzikon, Switzerland; prefer "
         "nearby Canton Zurich locations or remote work, and penalize clearly impractical commutes. "
         "For scores of 85 or higher, write a concise 2-3 sentence summary, provide 3-5 specific "
@@ -738,7 +852,23 @@ def evaluate_jobs_screening(client: genai.Client, jobs_list: list) -> BatchScree
     prompt = f"""
     Screen these {len(jobs_list)} Swiss job listings against the candidate profile.
     Return one result for every job. Mark a job as a potential match when it may satisfy
-    the role, location, workload, language, and exclusion preferences. Use a score from 0 to 100.
+    the role, location, workload, language, and exclusion preferences. Use a conservative score
+    from 0 to 100. Do not treat a familiar job title as proof of qualification. Explicitly
+    required Swiss-issued diplomas, certificates, licenses, or regulated credentials absent
+    from the candidate profile are major gaps and normally cap the score at 59. Prefer keeping
+    plausible junior, assistant, clerk, coordinator, back-office, and transferable-skill roles
+    as potential matches with a lower score rather than inflating them into strong matches. If
+    most core requirements are unsupported, especially the required discipline, education,
+    experience, or language level, use 0-39 rather than treating one shared keyword as a match.
+    Treat an explicitly required completed vocational apprenticeship as a severe gap when absent
+    from the profile. Recognize wording such as 'abgeschlossene Berufslehre', 'abgeschlossene
+    Lehre', 'Lehre', 'EFZ', or 'EBA'. Unless the listing explicitly accepts equivalent experience
+    or alternative qualifications, such a missing requirement should normally produce a score
+    below 40 and should not be marked as a potential match.
+    For hospitality listings, include hotel reception, front office, reservations, guest
+    services, hotel administration, and hotel back-office roles when their actual duties match
+    the profile. Prefer daytime work and reduce scores for night audit, overnight reception,
+    rotating shifts, and frequent weekend or public-holiday work.
 
     CANDIDATE PROFILE:
     {config.CANDIDATE_PROFILE}
@@ -943,17 +1073,24 @@ def send_fallback_email(jobs):
         cards = []
         for job in entries:
             cards.append(f"""
-                        <article class="job-card" style="margin-bottom:20px; padding:18px 20px; border:1px solid #e2e8f0; border-left:5px solid #2563eb; border-radius:6px; background:#ffffff;">
-                            <div class="job-header" style="margin-bottom:8px;">
-                                <a class="job-title" style="display:block; font-size:16px; line-height:1.4; font-weight:600; color:#1d4ed8; text-decoration:none; overflow-wrap:anywhere;" href="{escape(job['link'], quote=True)}">{escape(job['title'])}</a>
-                                <span class="badge badge-low" style="display:inline-block; margin-top:8px; padding:3px 8px; border-radius:12px; font-size:12px; line-height:1.3; font-weight:700; color:#ffffff; background:#64748b; white-space:nowrap;">Not evaluated</span>
+                        <article class="job-card">
+                            <div class="job-header">
+                                <a class="job-title" href="{escape(job['link'], quote=True)}">{escape(job['title'])}</a>
+                                <span class="badge badge-low">Not evaluated</span>
                             </div>
-                            <div class="job-meta" style="margin-bottom:12px; font-size:13px; line-height:1.5; color:#64748b; font-weight:500;">Source: {escape(job.get('source') or 'Unknown')} | Company: {escape(job.get('company') or 'Not provided')} | Location: {escape(job.get('location') or 'Not provided')} | Posted: {escape(job.get('posted_at') or job.get('discovered_at') or 'Unknown')}</div>
+                            <div class="job-meta">Source: {escape(job.get('source') or 'Unknown')} | Company: {escape(job.get('company') or 'Not provided')} | Location: {escape(job.get('location') or 'Not provided')} | Posted: {escape(job.get('posted_at') or job.get('discovered_at') or 'Unknown')}</div>
                         </article>""")
-        sections.append(f'<h2 style="margin:32px 0 16px; padding-bottom:8px; border-bottom:2px solid #e2e8f0; color:#0f172a; font-size:16px; line-height:1.4; text-transform:uppercase; letter-spacing:.05em;">{escape(category)} ({len(entries)})</h2>{"".join(cards)}')
+        sections.append(f'<h2>{escape(category)} ({len(entries)})</h2>{"".join(cards)}')
     subject = f"Swiss Job AI Agent: fallback job list ({len(jobs)} postings)"
+    source_counts = {}
+    for job in jobs:
+        source = job.get("source") or "Unknown"
+        source_counts[source] = source_counts.get(source, 0) + 1
+    source_summary = ", ".join(
+        f"{source}: {count}" for source, count in sorted(source_counts.items())
+    )
     summary = (
-        "These are the new job postings retrieved from jobs.ch and LinkedIn. "
+        f"These are the new job postings retrieved from {source_summary}. "
         f"A total of {len(jobs)} job(s) were found. "
         "AI evaluation was unavailable, so this is the complete structured list."
     )
@@ -1005,6 +1142,9 @@ def main(argv=None):
         imported_jobs_ch = import_jobs_ch_alerts()
         if imported_jobs_ch:
             print(f"   Imported {imported_jobs_ch} Jobs.ch alert posting(s).")
+        imported_joobly = import_joobly_alerts()
+        if imported_joobly:
+            print(f"   Imported {imported_joobly} Joobly alert posting(s).")
     except Exception as e:
         print(f"❌ Alert mailbox error; continuing with other sources: {e}")
 
@@ -1101,7 +1241,7 @@ def main(argv=None):
             except Exception as e:
                 print(f"❌ Fallback email error; postings remain available: {e}")
         else:
-            print("ℹ️ Finished: No matches with score >= 70%.")
+            print(f"ℹ️ Finished: No matches with score >= {MATCH_THRESHOLD}%.")
 
 if __name__ == "__main__":
     main()
