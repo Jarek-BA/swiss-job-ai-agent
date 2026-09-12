@@ -33,6 +33,10 @@ JOBS_CH_ALERT_SENDERS = tuple(dict.fromkeys(
 		f"{JOBS_CH_ALERT_SENDER},info@jobs.ch",
 	).split(",") if sender.strip()
 ))
+JOOBLY_ALERT_SENDERS = tuple(
+	sender.strip() for sender in os.getenv("JOOBLY_ALERT_SENDERS", "jooble.org").split(",")
+	if sender.strip()
+)
 
 # Private candidate configuration is kept as human-readable Markdown files.
 CANDIDATE_PROFILE = read_private_setting("candidate_profile.md")

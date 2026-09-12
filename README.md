@@ -9,7 +9,7 @@ An automated Swiss job scout for administrative and back-office roles in Canton 
 3. New postings are opened once with Playwright and their detail text is saved locally and archived in Cloud Storage when configured.
 4. Gemini performs a compact screening pass, up to 30 postings per request.
 5. Only potential matches are sent to detailed evaluation, in batches of 15.
-6. Matches scoring at least 70% are sent by email and marked as `emailed`, highest scores first.
+6. Matches scoring at least 60% are sent by email and marked as `emailed`, highest scores first. Scores from 60% to 69% represent plausible adjacent or underqualified roles and are included deliberately for realistic application opportunities.
 
 The database prevents a posting from being processed repeatedly. Jobs that fail during scraping, AI evaluation, or email delivery remain queued for a later run.
 
@@ -103,6 +103,7 @@ Optional Actions Variables:
 GEMINI_MODEL
 JOBS_CH_ALERT_SENDER
 JOBS_CH_ALERT_SENDERS
+JOOBLY_ALERT_SENDERS
 LINKEDIN_PROCESSED_FOLDER
 AI_ENABLED
 ```
@@ -110,6 +111,8 @@ AI_ENABLED
 `AI_ENABLED` accepts `yes` or `no`. Manual runs show a required **Run Gemini evaluation?** choice and default to `no`. Scheduled runs use the `AI_ENABLED` repository variable and default to `no` when it is not defined. With AI disabled, the workflow still imports alerts and sends the structured fallback email without requiring or calling Gemini.
 
 Jobs.ch alerts are read from both `jobmail@jobs.ch` and `info@jobs.ch` by default. Set `JOBS_CH_ALERT_SENDERS` to a comma-separated list if the sender addresses change. Imported postings follow the same parsing, deduplication, AI evaluation, email, and Google Sheets tracking flow.
+
+Jooble alerts are read from messages matching `jooble.org` by default. Set `JOOBLY_ALERT_SENDERS` to a comma-separated list if the alert sender uses a different address or domain. Jooble links are imported into the same parsing, deduplication, AI evaluation, email, and Google Sheets tracking flow.
 
 The local candidate profile and preferences are maintained as Markdown files in the private `personal-ai-agent-config/swiss-job-ai-agent/` repository. GitHub Actions checks out that repository using a read-only `PRIVATE_CONFIG_REPO_TOKEN`; candidate text does not need to be duplicated into GitHub Secrets. Do not commit private candidate data to this public repository.
 

@@ -25,6 +25,36 @@ class MainTests(unittest.TestCase):
         self.assertIn("jobmail@jobs.ch", main.config.JOBS_CH_ALERT_SENDERS)
         self.assertIn("info@jobs.ch", main.config.JOBS_CH_ALERT_SENDERS)
 
+    def test_joobly_sender_defaults_to_platform_domain(self):
+        self.assertTrue(main.config.JOOBLY_ALERT_SENDERS)
+        self.assertTrue(
+            all("jooble" in sender.lower() for sender in main.config.JOOBLY_ALERT_SENDERS)
+        )
+
+    def test_joobly_parser_extracts_and_deduplicates_job_links(self):
+        message = EmailMessage()
+        message.add_alternative(
+            """
+                        <a href="https://ch.jooble.org/away/123456">
+                            Mitarbeiter Finanzbuchhaltung und Administration/ Mitarbeiterin Finanzbuchhaltung und Administration 100% Hinwil ZH
+                            ✅ Empfohlen 💼 Stellvertretung 💼 Selbständige Tätigkeit 💼 Ferienjob
+                        </a>
+                        <a href="https://ch.jooble.org/away/123456">Office Manager</a>
+            <a href="https://ch.jooble.org/subscribe/unsubscribe">Unsubscribe</a>
+            """,
+            subtype="html",
+        )
+
+        self.assertEqual(
+            main.extract_joobly_alert_links(message),
+            [
+                (
+                    "https://ch.jooble.org/away/123456",
+                    "Mitarbeiter Finanzbuchhaltung und Administration/ Mitarbeiterin Finanzbuchhaltung und Administration 100% Hinwil ZH",
+                ),
+            ],
+        )
+
     def test_jobs_ch_parser_prefers_non_empty_duplicate_title(self):
         message = EmailMessage()
         message.add_alternative(
