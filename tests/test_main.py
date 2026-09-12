@@ -143,6 +143,19 @@ class MainTests(unittest.TestCase):
 
         mailbox.assert_not_called()
 
+    def test_processed_mail_is_marked_read_before_archiving(self):
+        original_dry_run = main.DRY_RUN
+        self.addCleanup(setattr, main, "DRY_RUN", original_dry_run)
+        main.DRY_RUN = False
+        mailbox = mock.Mock()
+        mailbox.select.return_value = ("OK", [])
+        mailbox.uid.return_value = ("OK", [])
+
+        main.move_email_to_processed_folder(mailbox, "123")
+
+        mailbox.uid.assert_any_call("STORE", "123", "+FLAGS", "(\\Seen)")
+        mailbox.uid.assert_any_call("COPY", "123", main.config.LINKEDIN_PROCESSED_FOLDER)
+
     def test_dry_run_skips_google_sheets_sync(self):
         original_dry_run = main.DRY_RUN
         self.addCleanup(setattr, main, "DRY_RUN", original_dry_run)
@@ -188,6 +201,12 @@ class MainTests(unittest.TestCase):
             "**Responsibilities**\n\n- Manage orders and invoices.",
         )
         self.assertNotIn("Sign in", description)
+        page.goto.assert_called_once_with(
+            "https://www.linkedin.com/jobs/view/123",
+            wait_until="commit",
+            timeout=15000,
+        )
+        page.wait_for_load_state.assert_any_call("domcontentloaded", timeout=15000)
 
     def test_jobs_ch_parser_extracts_labeled_metadata_and_removes_location_from_title(self):
         message = EmailMessage()

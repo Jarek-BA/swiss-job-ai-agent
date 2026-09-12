@@ -262,6 +262,9 @@ def move_email_to_processed_folder(mailbox, uid):
         if create_result not in {"OK", "ALREADYEXISTS"}:
             raise RuntimeError(f"Could not create mailbox folder: {folder}")
     mailbox.select("INBOX", readonly=False)
+    result, _ = mailbox.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+    if result != "OK":
+        raise RuntimeError(f"Could not mark alert UID {uid} as read")
     result, _ = mailbox.uid("COPY", uid, folder)
     if result != "OK":
         raise RuntimeError(f"Could not move alert UID {uid} to {folder}")
@@ -662,7 +665,8 @@ def import_joobly_alerts():
             uid = uid_bytes.decode("ascii")
             if email_was_processed(mailbox_name, uid):
                 continue
-            fetch_command = "(BODY.PEEK[])" if DRY_RUN else "(RFC822)"
+            # Keep the message unread until it has been imported and archived.
+            fetch_command = "(BODY.PEEK[])"
             result, message_data = mailbox.uid("fetch", uid, fetch_command)
             if result != "OK":
                 continue
@@ -692,8 +696,22 @@ def import_joobly_alerts():
 def fetch_job_detail_page(page, job_url):
     """Extracts description text from detail page."""
     try:
-        page.goto(job_url, wait_until="domcontentloaded", timeout=15000)
-        soup = BeautifulSoup(page.content(), "html.parser")
+        page.goto(job_url, wait_until="commit", timeout=15000)
+        page.wait_for_load_state("domcontentloaded", timeout=15000)
+        try:
+            page.wait_for_load_state("load", timeout=5000)
+        except Exception:
+            pass
+        content_html = ""
+        for attempt in range(2):
+            try:
+                content_html = page.content()
+                break
+            except Exception:
+                if attempt == 1:
+                    raise
+                page.wait_for_load_state("domcontentloaded", timeout=15000)
+        soup = BeautifulSoup(content_html, "html.parser")
 
         content = (
             soup.select_one(".show-more-less-html__markup")
