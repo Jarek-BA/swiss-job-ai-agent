@@ -336,6 +336,30 @@ class MainTests(unittest.TestCase):
         self.assertIn("Summary &amp; details", rendered)
         self.assertNotIn("{{SUBJECT}}", rendered)
 
+    def test_template_renders_generation_summary_table(self):
+        audit = {
+            "platforms": {
+                "linkedin": {
+                    "new": 2,
+                    "rejected": 1,
+                    "evaluated": 3,
+                    "scores": main.Counter({"0-39%": 1, "60-79%": 1, "80-100%": 1}),
+                    "recommended": 1,
+                },
+            },
+        }
+        rendered = main.render_email(
+            "Job list",
+            "Summary",
+            "<p>Job section</p>",
+            main.render_summary_table(audit),
+        )
+        self.assertIn("Generation summary by platform", rendered)
+        self.assertIn("Rejected", rendered)
+        self.assertIn("linkedin", rendered)
+        self.assertIn("New = stored but not yet rejected or detailed-evaluated.", rendered)
+        self.assertLess(rendered.index("Generation summary"), rendered.index("Job section"))
+
     def test_email_summary_describes_sources_and_total(self):
         rendered = main.render_email(
             "Job list",

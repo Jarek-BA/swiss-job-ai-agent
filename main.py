@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import argparse
 import time
+from collections import Counter
 from datetime import date
 from html import escape
 from email.header import decode_header
@@ -306,6 +307,46 @@ def get_fallback_jobs():
             "ORDER BY discovered_at"
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_generation_audit():
+    if use_firestore():
+        rows = [JOB_STORE._normalise(document) for document in JOB_STORE.jobs.stream()]
+    else:
+        with sqlite3.connect(DATABASE_PATH) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = [dict(row) for row in connection.execute(
+                "SELECT source, status, screening, evaluation FROM jobs"
+            ).fetchall()]
+
+    platform_rows = {}
+    for row in rows:
+        platform = row.get("source") or "Unknown"
+        platform_row = platform_rows.setdefault(platform, {
+            "new": 0,
+            "rejected": 0,
+            "evaluated": 0,
+            "scores": Counter(),
+            "recommended": 0,
+        })
+        status = row.get("status")
+        if status in {"discovered", "details_failed", "ready", "screened"}:
+            platform_row["new"] += 1
+        elif status == "rejected":
+            platform_row["rejected"] += 1
+        if row.get("evaluation"):
+            try:
+                evaluation = SingleJobEvaluation.model_validate_json(row["evaluation"])
+                platform_row["evaluated"] += 1
+                platform_row["scores"][score_bucket(evaluation.match_score)] += 1
+                if evaluation.is_relevant and evaluation.match_score >= MATCH_THRESHOLD:
+                    platform_row["recommended"] += 1
+            except (TypeError, ValueError):
+                pass
+
+    return {
+        "platforms": platform_rows,
+    }
 
 def mark_fallback_notified(jobs):
     if use_firestore():
@@ -929,11 +970,72 @@ def categorise_job(title):
         return "Sachbearbeitung & Kaufmännisch"
     return "Business Support, Sales Ops & Data"
 
-def render_email(template_subject, summary, sections):
+def score_bucket(score):
+    if score < 40:
+        return "0-39%"
+    if score < 60:
+        return "40-59%"
+    if score < 80:
+        return "60-79%"
+    return "80-100%"
+
+
+def render_summary_table(audit):
+    columns = (
+        ("Platform", "platform"),
+        ("New", "new"),
+        ("Rejected", "rejected"),
+        ("Evaluated", "evaluated"),
+        ("0-39", "0-39%"),
+        ("40-59", "40-59%"),
+        ("60-79", "60-79%"),
+        ("80-100", "80-100%"),
+        ("Recommended", "recommended"),
+    )
+    header = "".join(
+        f'<th style="padding:8px 10px; border-bottom:1px solid #cbd5e1; text-align:left; color:#475569; font-size:11px; font-weight:700; white-space:nowrap;">{escape(label)}</th>'
+        for label, _ in columns
+    )
+    rendered_rows = []
+    totals = Counter()
+    for platform, values in sorted(audit["platforms"].items()):
+        cells = [platform]
+        cells.extend(values[key] for key in ("new", "rejected", "evaluated"))
+        cells.extend(values["scores"].get(bucket, 0) for bucket in ("0-39%", "40-59%", "60-79%", "80-100%"))
+        cells.append(values["recommended"])
+        for key, value in zip((key for _, key in columns), cells):
+            if key != "platform":
+                totals[key] += value
+        rendered_rows.append(
+            "<tr>" + "".join(
+                f'<td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; color:#1e293b; font-size:13px; white-space:nowrap;">{escape(str(value))}</td>'
+                for value in cells
+            ) + "</tr>"
+        )
+    total_cells = ["Total"] + [totals[key] for _, key in columns if key != "platform"]
+    rendered_rows.append(
+        '<tr style="font-weight:700; background:#f8fafc;">' + "".join(
+            f'<td style="padding:8px 10px; border-top:2px solid #cbd5e1; color:#0f172a; font-size:13px; white-space:nowrap;">{escape(str(value))}</td>'
+            for value in total_cells
+        ) + "</tr>"
+    )
+    return (
+        '<div class="generation-summary" style="margin:0 0 24px; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden;">'
+        '<div style="padding:10px 12px; background:#f1f5f9; color:#0f172a; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;">Generation summary by platform</div>'
+        '<div style="overflow-x:auto;"><table role="presentation" style="width:100%; min-width:700px; border-collapse:collapse;">'
+        f'<thead><tr>{header}</tr></thead><tbody>{"".join(rendered_rows)}</tbody>'
+        '</table></div>'
+        '<div style="padding:9px 12px; background:#f8fafc; color:#64748b; font-size:11px; line-height:1.4;">New = stored but not yet rejected or detailed-evaluated. Rejected = screening decision, not duplicate suppression. Score ranges use detailed evaluation scores. Recommended = relevant and score at least 60%.</div>'
+        '</div>'
+    )
+
+
+def render_email(template_subject, summary, sections, summary_table=""):
     template = EMAIL_TEMPLATE_PATH.read_text(encoding="utf-8")
     return (template
             .replace("{{SUBJECT}}", escape(template_subject))
             .replace("{{SUMMARY}}", escape(summary))
+            .replace("{{SUMMARY_TABLE}}", summary_table)
             .replace("{{JOB_SECTIONS}}", sections))
 
 def html_to_plain_text(body):
@@ -1053,7 +1155,8 @@ def render_match_card(job, eval_data):
                             <div class="strategy-box" style="margin-top:8px; padding:8px 12px; border:1px solid #a5f3fc; border-radius:4px; background:#ecfeff; color:#155e75; font-size:13px; line-height:1.5;"><strong>Application strategy:</strong> {escape(strategy)}</div>
                         </article>"""
 
-def send_email(jobs_with_eval):
+def send_email(jobs_with_eval, audit=None):
+    audit = audit or get_generation_audit()
     jobs_with_eval = sort_matches(jobs_with_eval)
     sections = []
     grouped = {category: [] for category in JOB_CATEGORIES}
@@ -1076,10 +1179,18 @@ def send_email(jobs_with_eval):
         f"(85%+), {potential_matches} strong potential match(es) (75%+), and {low_matches} "
         "additional match(es)."
     )
-    body = render_email(subject, summary, "".join(sections))
+    source_counts = {}
+    for job, _ in jobs_with_eval:
+        source = job.get("source") or "Unknown"
+        source_counts[source] = source_counts.get(source, 0) + 1
+    source_summary = ", ".join(
+        f"{source}: {count}" for source, count in sorted(source_counts.items())
+    )
+    body = render_email(subject, summary, "".join(sections), render_summary_table(audit))
     send_html_email(subject, body)
 
-def send_fallback_email(jobs):
+def send_fallback_email(jobs, audit=None):
+    audit = audit or get_generation_audit()
     grouped = {category: [] for category in JOB_CATEGORIES}
     for job in jobs:
         grouped[categorise_job(job["title"])].append(job)
@@ -1112,7 +1223,7 @@ def send_fallback_email(jobs):
         f"A total of {len(jobs)} job(s) were found. "
         "AI evaluation was unavailable, so this is the complete structured list."
     )
-    body = render_email(subject, summary, "".join(sections))
+    body = render_email(subject, summary, "".join(sections), render_summary_table(audit))
     send_html_email(subject, body)
 
 def parse_main_args(argv=None):
