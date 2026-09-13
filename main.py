@@ -309,18 +309,38 @@ def get_fallback_jobs():
     return [dict(row) for row in rows]
 
 
-def get_generation_audit():
+def get_jobs_by_links(links):
+    links = set(links)
+    if not links:
+        return []
     if use_firestore():
         rows = [JOB_STORE._normalise(document) for document in JOB_STORE.jobs.stream()]
-    else:
-        with sqlite3.connect(DATABASE_PATH) as connection:
-            connection.row_factory = sqlite3.Row
-            rows = [dict(row) for row in connection.execute(
-                "SELECT source, status, screening, evaluation FROM jobs"
-            ).fetchall()]
+        return [row for row in rows if row.get("link") in links]
+    placeholders = ",".join("?" for _ in links)
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT link, source, status, screening, evaluation FROM jobs "
+            f"WHERE link IN ({placeholders})",
+            tuple(links),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def merge_jobs(*groups):
+    jobs_by_link = {}
+    for group in groups:
+        for job in group:
+            if job.get("link"):
+                jobs_by_link[job["link"]] = job
+    return list(jobs_by_link.values())
+
+
+def get_generation_audit(jobs, recommended_jobs=()):
+    recommended_links = {job["link"] for job, _ in recommended_jobs}
 
     platform_rows = {}
-    for row in rows:
+    for row in jobs:
         platform = row.get("source") or "Unknown"
         platform_row = platform_rows.setdefault(platform, {
             "new": 0,
@@ -329,20 +349,18 @@ def get_generation_audit():
             "scores": Counter(),
             "recommended": 0,
         })
-        status = row.get("status")
-        if status in {"discovered", "details_failed", "ready", "screened"}:
-            platform_row["new"] += 1
-        elif status == "rejected":
-            platform_row["rejected"] += 1
+        platform_row["new"] += 1
         if row.get("evaluation"):
             try:
                 evaluation = SingleJobEvaluation.model_validate_json(row["evaluation"])
                 platform_row["evaluated"] += 1
                 platform_row["scores"][score_bucket(evaluation.match_score)] += 1
-                if evaluation.is_relevant and evaluation.match_score >= MATCH_THRESHOLD:
-                    platform_row["recommended"] += 1
             except (TypeError, ValueError):
                 pass
+        if row.get("link") in recommended_links:
+            platform_row["recommended"] += 1
+    for platform_row in platform_rows.values():
+        platform_row["rejected"] = platform_row["new"] - platform_row["evaluated"]
 
     return {
         "platforms": platform_rows,
@@ -1025,7 +1043,7 @@ def render_summary_table(audit):
         '<div style="overflow-x:auto;"><table role="presentation" style="width:100%; min-width:700px; border-collapse:collapse;">'
         f'<thead><tr>{header}</tr></thead><tbody>{"".join(rendered_rows)}</tbody>'
         '</table></div>'
-        '<div style="padding:9px 12px; background:#f8fafc; color:#64748b; font-size:11px; line-height:1.4;">New = stored but not yet rejected or detailed-evaluated. Rejected = screening decision, not duplicate suppression. Score ranges use detailed evaluation scores. Recommended = relevant and score at least 60%.</div>'
+        '<div style="padding:9px 12px; background:#f8fafc; color:#64748b; font-size:11px; line-height:1.4;">New = postings included in this email run. Rejected = postings not advanced to detailed evaluation, including screening or processing failures. Evaluated = postings with a valid detailed evaluation. Score ranges use detailed evaluation scores. Recommended = cards shown in this email.</div>'
         '</div>'
     )
 
@@ -1156,7 +1174,9 @@ def render_match_card(job, eval_data):
                         </article>"""
 
 def send_email(jobs_with_eval, audit=None):
-    audit = audit or get_generation_audit()
+    audit = audit or get_generation_audit(
+        [job for job, _ in jobs_with_eval], jobs_with_eval
+    )
     jobs_with_eval = sort_matches(jobs_with_eval)
     sections = []
     grouped = {category: [] for category in JOB_CATEGORIES}
@@ -1190,7 +1210,7 @@ def send_email(jobs_with_eval, audit=None):
     send_html_email(subject, body)
 
 def send_fallback_email(jobs, audit=None):
-    audit = audit or get_generation_audit()
+    audit = audit or get_generation_audit(jobs)
     grouped = {category: [] for category in JOB_CATEGORIES}
     for job in jobs:
         grouped[categorise_job(job["title"])].append(job)
@@ -1280,6 +1300,11 @@ def main(argv=None):
     pending_jobs = get_pending_jobs()
     ready_jobs = get_ready_jobs()
     screened_jobs = get_screened_jobs()
+    run_links = {
+        job["link"]
+        for job in pending_jobs + ready_jobs + screened_jobs
+        if job.get("link")
+    }
     print(f"📡 Email alerts queued {len(pending_jobs) + len(ready_jobs) + len(screened_jobs)} listings; "
           f"{len(pending_jobs)} need details, "
           f"{len(ready_jobs)} need screening, {len(screened_jobs)} await detailed evaluation.")
@@ -1294,13 +1319,19 @@ def main(argv=None):
         matches = get_evaluated_matches()
         if matches:
             sync_matches_to_google_sheet(matches)
-            send_email(matches)
+            audit_jobs = merge_jobs(
+                get_jobs_by_links(run_links), [job for job, _ in matches]
+            )
+            send_email(matches, get_generation_audit(audit_jobs, matches))
             mark_emailed([job for job, _ in matches])
             print(f"✅ Success: Email sent with {len(matches)} position(s)!")
         else:
             fallback_jobs = get_fallback_jobs()
             if fallback_jobs:
-                send_fallback_email(fallback_jobs)
+                send_fallback_email(
+                    fallback_jobs,
+                    get_generation_audit(merge_jobs(get_jobs_by_links(run_links), fallback_jobs)),
+                )
                 mark_fallback_notified(fallback_jobs)
                 print(f"ℹ️ Fallback email sent with {len(fallback_jobs)} posting(s).")
             else:
@@ -1311,7 +1342,10 @@ def main(argv=None):
         fallback_jobs = get_fallback_jobs()
         if fallback_jobs:
             try:
-                send_fallback_email(fallback_jobs)
+                send_fallback_email(
+                    fallback_jobs,
+                    get_generation_audit(merge_jobs(get_jobs_by_links(run_links), fallback_jobs)),
+                )
                 mark_fallback_notified(fallback_jobs)
                 print(f"ℹ️ AI disabled: fallback email sent with {len(fallback_jobs)} posting(s).")
             except Exception as e:
@@ -1355,7 +1389,10 @@ def main(argv=None):
     if matches:
         try:
             sync_matches_to_google_sheet(matches)
-            send_email(matches)
+            audit_jobs = merge_jobs(
+                get_jobs_by_links(run_links), [job for job, _ in matches]
+            )
+            send_email(matches, get_generation_audit(audit_jobs, matches))
             mark_emailed([job for job, _ in matches])
             print(f"✅ Success: Email sent with {len(matches)} position(s)!")
         except Exception as e:
@@ -1364,7 +1401,10 @@ def main(argv=None):
         fallback_jobs = get_fallback_jobs()
         if fallback_jobs:
             try:
-                send_fallback_email(fallback_jobs)
+                send_fallback_email(
+                    fallback_jobs,
+                    get_generation_audit(merge_jobs(get_jobs_by_links(run_links), fallback_jobs)),
+                )
                 mark_fallback_notified(fallback_jobs)
                 print(f"ℹ️ Fallback email sent with {len(fallback_jobs)} posting(s).")
             except Exception as e:

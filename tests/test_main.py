@@ -357,8 +357,34 @@ class MainTests(unittest.TestCase):
         self.assertIn("Generation summary by platform", rendered)
         self.assertIn("Rejected", rendered)
         self.assertIn("linkedin", rendered)
-        self.assertIn("New = stored but not yet rejected or detailed-evaluated.", rendered)
+        self.assertIn("New = postings included in this email run.", rendered)
         self.assertLess(rendered.index("Generation summary"), rendered.index("Job section"))
+
+    def test_generation_audit_is_run_scoped_and_partitioned(self):
+        evaluation = main.SingleJobEvaluation(
+            job_index=1,
+            is_relevant=True,
+            match_score=82,
+            job_title="Office Administrator",
+            company="Example AG",
+            location="Wetzikon",
+            pros=[],
+            cons_or_gaps="",
+            summary="Good fit.",
+            application_strategy="Apply.",
+        )
+        jobs = [
+            {"link": "https://example.com/1", "source": "linkedin", "evaluation": evaluation.model_dump_json()},
+            {"link": "https://example.com/2", "source": "linkedin", "evaluation": None},
+            {"link": "https://example.com/3", "source": "linkedin", "evaluation": None},
+        ]
+        audit = main.get_generation_audit([jobs[0], jobs[1], jobs[2]], [(jobs[0], evaluation)])
+        row = audit["platforms"]["linkedin"]
+        self.assertEqual(row["new"], 3)
+        self.assertEqual(row["rejected"], 2)
+        self.assertEqual(row["evaluated"], 1)
+        self.assertEqual(row["recommended"], 1)
+        self.assertEqual(row["rejected"] + row["evaluated"], row["new"])
 
     def test_email_summary_describes_sources_and_total(self):
         rendered = main.render_email(
