@@ -28,7 +28,9 @@ from src.services.job_store import FirestoreJobStore
 
 MAX_JOBS_PER_BATCH = 15
 MAX_SCREENING_BATCH = 30
-SCREENING_THRESHOLD = 60
+# The screening pass is a cheap triage step; borderline jobs should reach the
+# detailed evaluator, which applies the stricter relevance and score decision.
+SCREENING_THRESHOLD = 40
 MATCH_THRESHOLD = 60
 MAX_DESCRIPTION_CHARS = 2500
 AI_MAX_ATTEMPTS = 3
@@ -136,6 +138,9 @@ class ScreeningEvaluation(BaseModel):
 
 class BatchScreeningEvaluation(BaseModel):
     evaluations: List[ScreeningEvaluation]
+
+class PersonalizedEmailSummary(BaseModel):
+    summary: str
 
 def initialise_database():
     global JOB_STORE
@@ -350,17 +355,32 @@ def get_generation_audit(jobs, recommended_jobs=()):
             "recommended": 0,
         })
         platform_row["new"] += 1
+        screening_score = None
+        has_evaluation = False
+        if row.get("screening"):
+            try:
+                screening_score = ScreeningEvaluation.model_validate_json(
+                    row["screening"]
+                ).match_score
+            except (TypeError, ValueError):
+                pass
+        final_score = screening_score
         if row.get("evaluation"):
             try:
                 evaluation = SingleJobEvaluation.model_validate_json(row["evaluation"])
                 platform_row["evaluated"] += 1
-                platform_row["scores"][score_bucket(evaluation.match_score)] += 1
+                final_score = evaluation.match_score
+                has_evaluation = True
             except (TypeError, ValueError):
                 pass
+        if final_score is not None:
+            platform_row["scores"][score_bucket(final_score)] += 1
+        if not has_evaluation and (
+            screening_score is None or screening_score < SCREENING_THRESHOLD
+        ):
+            platform_row["rejected"] += 1
         if row.get("link") in recommended_links:
             platform_row["recommended"] += 1
-    for platform_row in platform_rows.values():
-        platform_row["rejected"] = platform_row["new"] - platform_row["evaluated"]
 
     return {
         "platforms": platform_rows,
@@ -976,6 +996,63 @@ def evaluate_jobs_screening(client: genai.Client, jobs_list: list) -> BatchScree
     )
     return BatchScreeningEvaluation.model_validate_json(response.text)
 
+
+def generate_personalized_email_summary(client, jobs_with_eval=(), jobs=()):
+    if not client or (not jobs_with_eval and not jobs):
+        return ""
+    listings_with_evaluations = jobs_with_eval or [(job, None) for job in jobs]
+    listings = "".join(
+        f"\n--- POSITION [{index}] ---\n"
+        f"Title: {evaluation.job_title if evaluation else job.get('title') or 'Not provided'}\n"
+        f"Company: {(evaluation.company if evaluation else '') or job.get('company') or 'Not provided'}\n"
+        f"Location: {(evaluation.location if evaluation else '') or job.get('location') or 'Not provided'}\n"
+        f"Match score: {f'{evaluation.match_score}%' if evaluation else 'Not evaluated'}\n"
+        f"Evaluation summary: {evaluation.summary if evaluation else 'Not evaluated'}\n"
+        f"Gaps: {evaluation.cons_or_gaps if evaluation else 'Not evaluated'}\n"
+        f"Description: {(job.get('description') or '')[:MAX_DESCRIPTION_CHARS]}\n"
+        for index, (job, evaluation) in enumerate(listings_with_evaluations, start=1)
+    )
+    prompt = f"""
+    Write a personalized opening paragraph for today's Swiss job recommendation email.
+    Explain what the recommended positions collectively offer this candidate and which
+    types of opportunities stand out. Focus on concrete role families, seniority, work
+    setting, and meaningful trade-offs visible in the listings. Do not claim that a role
+    is suitable without evidence. Do not list every job, repeat scores, or give application
+    instructions. Keep it to 80-120 words, in a warm but factual professional tone, and
+    write directly to the candidate using "you".
+
+    CANDIDATE PROFILE:
+    {config.CANDIDATE_PROFILE}
+
+    PREFERENCES & CONSTRAINTS:
+    {config.CANDIDATE_PREFERENCES}
+
+    TODAY'S RECOMMENDED POSITIONS:
+    {listings}
+    """
+    response = generate_content_with_retry(
+        client,
+        model=config.GEMINI_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=PersonalizedEmailSummary,
+            system_instruction=(
+                "Return one concise email-opening summary as JSON. Do not invent facts "
+                "or mention jobs absent from the provided positions."
+            ),
+        ),
+    )
+    return PersonalizedEmailSummary.model_validate_json(response.text).summary.strip()
+
+
+def try_generate_personalized_email_summary(client, jobs_with_eval=(), jobs=()):
+    try:
+        return generate_personalized_email_summary(client, jobs_with_eval, jobs)
+    except Exception as error:
+        print(f"   Personalized email summary unavailable; email continues: {error}")
+        return ""
+
 def categorise_job(title):
     title = title.lower()
     if any(term in title for term in ("test", "qa", "quality assurance")):
@@ -1002,7 +1079,6 @@ def render_summary_table(audit):
     columns = (
         ("Platform", "platform"),
         ("New", "new"),
-        ("Rejected", "rejected"),
         ("Evaluated", "evaluated"),
         ("0-39", "0-39%"),
         ("40-59", "40-59%"),
@@ -1018,7 +1094,7 @@ def render_summary_table(audit):
     totals = Counter()
     for platform, values in sorted(audit["platforms"].items()):
         cells = [platform]
-        cells.extend(values[key] for key in ("new", "rejected", "evaluated"))
+        cells.extend(values[key] for key in ("new", "evaluated"))
         cells.extend(values["scores"].get(bucket, 0) for bucket in ("0-39%", "40-59%", "60-79%", "80-100%"))
         cells.append(values["recommended"])
         for key, value in zip((key for _, key in columns), cells):
@@ -1043,17 +1119,78 @@ def render_summary_table(audit):
         '<div style="overflow-x:auto;"><table role="presentation" style="width:100%; min-width:700px; border-collapse:collapse;">'
         f'<thead><tr>{header}</tr></thead><tbody>{"".join(rendered_rows)}</tbody>'
         '</table></div>'
-        '<div style="padding:9px 12px; background:#f8fafc; color:#64748b; font-size:11px; line-height:1.4;">New = postings included in this email run. Rejected = postings not advanced to detailed evaluation, including screening or processing failures. Evaluated = postings with a valid detailed evaluation. Score ranges use detailed evaluation scores. Recommended = cards shown in this email.</div>'
+        '<div style="padding:9px 12px; background:#f8fafc; color:#64748b; font-size:11px; line-height:1.4;">New = postings included in this email run. Evaluated = postings with a valid detailed evaluation. Score ranges use the detailed score when available, otherwise the screening score; below-threshold screening results appear in 0-39. Recommended = cards shown in this email.</div>'
         '</div>'
     )
 
 
-def render_email(template_subject, summary, sections, summary_table=""):
+def build_qualification_summary(jobs):
+    qualification_patterns = (
+        ("University degree", ("bachelor", "master", "phd", "doctorate", "hochschulabschluss", "universitätsabschluss")),
+        ("Vocational apprenticeship or trade qualification", ("berufslehre", "abgeschlossene lehre", "lehrabschluss", "efz", "eba", "ausbildung")),
+        ("Professional diploma or certificate", ("diplom", "diploma", "zertifikat", "certificate", "fachausweis", "weiterbildung")),
+        ("Required professional license or regulated credential", ("berufsausweis", "berufsbewilligung", "zulassung", "bewilligung", "license", "licence", "staatsexamen")),
+    )
+    matches = []
+    for job in jobs:
+        try:
+            evaluation = SingleJobEvaluation.model_validate_json(job["evaluation"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if evaluation.match_score < MATCH_THRESHOLD:
+            continue
+        text = " ".join(
+            str(value or "")
+            for value in (job.get("title"), job.get("description"))
+        ).lower()
+        matches.append((job, evaluation, text))
+
+    pattern_rows = []
+    for label, terms in qualification_patterns:
+        matched = [
+            (job, evaluation)
+            for job, evaluation, text in matches
+            if any(term in text for term in terms)
+        ]
+        if matched:
+            titles = []
+            for job, evaluation in matched:
+                title = evaluation.job_title or job.get("title") or "Untitled role"
+                if title not in titles:
+                    titles.append(title)
+            pattern_rows.append((len(matched), label, titles[:3]))
+    pattern_rows.sort(key=lambda row: (-row[0], row[1]))
+    if not pattern_rows:
+        return "<p class=\"qualification-summary\" style=\"margin:0 0 24px; color:#475569; font-size:13px; line-height:1.5;\"><strong>Educational requirement patterns:</strong> No formal education or credential requirements were identified among detailed evaluations at or above the 60% threshold.</p>"
+    items = []
+    for count, label, titles in pattern_rows:
+        examples = ", ".join(escape(title) for title in titles)
+        items.append(
+            f"{escape(label)} ({count}): typical positions include {examples}."
+        )
+    return (
+        '<p class="qualification-summary" style="margin:0 0 24px; color:#475569; font-size:13px; line-height:1.5;">'
+        '<strong>Educational requirement patterns among jobs at or above 60%:</strong> '
+        + " ".join(items)
+        + "</p>"
+    )
+
+
+def render_email(
+    template_subject,
+    summary,
+    sections,
+    summary_table="",
+    qualification_summary="",
+    personalized_summary="",
+):
     template = EMAIL_TEMPLATE_PATH.read_text(encoding="utf-8")
     return (template
             .replace("{{SUBJECT}}", escape(template_subject))
             .replace("{{SUMMARY}}", escape(summary))
+            .replace("{{PERSONALIZED_SUMMARY}}", escape(personalized_summary))
             .replace("{{SUMMARY_TABLE}}", summary_table)
+            .replace("{{QUALIFICATION_SUMMARY}}", qualification_summary)
             .replace("{{JOB_SECTIONS}}", sections))
 
 def html_to_plain_text(body):
@@ -1173,10 +1310,11 @@ def render_match_card(job, eval_data):
                             <div class="strategy-box" style="margin-top:8px; padding:8px 12px; border:1px solid #a5f3fc; border-radius:4px; background:#ecfeff; color:#155e75; font-size:13px; line-height:1.5;"><strong>Application strategy:</strong> {escape(strategy)}</div>
                         </article>"""
 
-def send_email(jobs_with_eval, audit=None):
+def send_email(jobs_with_eval, audit=None, qualification_jobs=None, personalized_summary=""):
     audit = audit or get_generation_audit(
         [job for job, _ in jobs_with_eval], jobs_with_eval
     )
+    qualification_jobs = qualification_jobs or [job for job, _ in jobs_with_eval]
     jobs_with_eval = sort_matches(jobs_with_eval)
     sections = []
     grouped = {category: [] for category in JOB_CATEGORIES}
@@ -1206,10 +1344,17 @@ def send_email(jobs_with_eval, audit=None):
     source_summary = ", ".join(
         f"{source}: {count}" for source, count in sorted(source_counts.items())
     )
-    body = render_email(subject, summary, "".join(sections), render_summary_table(audit))
+    body = render_email(
+        subject,
+        summary,
+        "".join(sections),
+        render_summary_table(audit),
+        build_qualification_summary(qualification_jobs),
+        personalized_summary,
+    )
     send_html_email(subject, body)
 
-def send_fallback_email(jobs, audit=None):
+def send_fallback_email(jobs, audit=None, personalized_summary=""):
     audit = audit or get_generation_audit(jobs)
     grouped = {category: [] for category in JOB_CATEGORIES}
     for job in jobs:
@@ -1243,7 +1388,14 @@ def send_fallback_email(jobs, audit=None):
         f"A total of {len(jobs)} job(s) were found. "
         "AI evaluation was unavailable, so this is the complete structured list."
     )
-    body = render_email(subject, summary, "".join(sections), render_summary_table(audit))
+    body = render_email(
+        subject,
+        summary,
+        "".join(sections),
+        render_summary_table(audit),
+        build_qualification_summary([]),
+        personalized_summary,
+    )
     send_html_email(subject, body)
 
 def parse_main_args(argv=None):
@@ -1322,7 +1474,17 @@ def main(argv=None):
             audit_jobs = merge_jobs(
                 get_jobs_by_links(run_links), [job for job, _ in matches]
             )
-            send_email(matches, get_generation_audit(audit_jobs, matches))
+            try:
+                personalized_summary = generate_personalized_email_summary(client, matches)
+            except Exception as error:
+                personalized_summary = ""
+                print(f"   Personalized email summary unavailable; email continues: {error}")
+            send_email(
+                matches,
+                get_generation_audit(audit_jobs, matches),
+                audit_jobs,
+                personalized_summary,
+            )
             mark_emailed([job for job, _ in matches])
             print(f"✅ Success: Email sent with {len(matches)} position(s)!")
         else:
@@ -1331,6 +1493,7 @@ def main(argv=None):
                 send_fallback_email(
                     fallback_jobs,
                     get_generation_audit(merge_jobs(get_jobs_by_links(run_links), fallback_jobs)),
+                    try_generate_personalized_email_summary(client, jobs=fallback_jobs),
                 )
                 mark_fallback_notified(fallback_jobs)
                 print(f"ℹ️ Fallback email sent with {len(fallback_jobs)} posting(s).")
@@ -1345,6 +1508,7 @@ def main(argv=None):
                 send_fallback_email(
                     fallback_jobs,
                     get_generation_audit(merge_jobs(get_jobs_by_links(run_links), fallback_jobs)),
+                    try_generate_personalized_email_summary(client, jobs=fallback_jobs),
                 )
                 mark_fallback_notified(fallback_jobs)
                 print(f"ℹ️ AI disabled: fallback email sent with {len(fallback_jobs)} posting(s).")
@@ -1392,7 +1556,17 @@ def main(argv=None):
             audit_jobs = merge_jobs(
                 get_jobs_by_links(run_links), [job for job, _ in matches]
             )
-            send_email(matches, get_generation_audit(audit_jobs, matches))
+            try:
+                personalized_summary = generate_personalized_email_summary(client, matches)
+            except Exception as error:
+                personalized_summary = ""
+                print(f"   Personalized email summary unavailable; email continues: {error}")
+            send_email(
+                matches,
+                get_generation_audit(audit_jobs, matches),
+                audit_jobs,
+                personalized_summary,
+            )
             mark_emailed([job for job, _ in matches])
             print(f"✅ Success: Email sent with {len(matches)} position(s)!")
         except Exception as e:
@@ -1404,6 +1578,7 @@ def main(argv=None):
                 send_fallback_email(
                     fallback_jobs,
                     get_generation_audit(merge_jobs(get_jobs_by_links(run_links), fallback_jobs)),
+                    try_generate_personalized_email_summary(client, jobs=fallback_jobs),
                 )
                 mark_fallback_notified(fallback_jobs)
                 print(f"ℹ️ Fallback email sent with {len(fallback_jobs)} posting(s).")
