@@ -25,6 +25,10 @@ class MainTests(unittest.TestCase):
         self.assertIn("jobmail@jobs.ch", main.config.JOBS_CH_ALERT_SENDERS)
         self.assertIn("info@jobs.ch", main.config.JOBS_CH_ALERT_SENDERS)
 
+    def test_screening_threshold_allows_borderline_jobs_to_reach_detailed_evaluation(self):
+        self.assertEqual(main.SCREENING_THRESHOLD, 40)
+        self.assertEqual(main.MATCH_THRESHOLD, 60)
+
     def test_joobly_sender_defaults_to_platform_domain(self):
         self.assertTrue(main.config.JOOBLY_ALERT_SENDERS)
         self.assertTrue(
@@ -336,6 +340,22 @@ class MainTests(unittest.TestCase):
         self.assertIn("Summary &amp; details", rendered)
         self.assertNotIn("{{SUBJECT}}", rendered)
 
+    def test_template_renders_personalized_summary_before_generation_table(self):
+        rendered = main.render_email(
+            "Job list",
+            "Summary",
+            "<p>Job section</p>",
+            "<div>Generation summary</div>",
+            "",
+            "These roles offer realistic daytime administrative opportunities.",
+        )
+        self.assertIn("These roles offer realistic daytime administrative opportunities.", rendered)
+        self.assertLess(rendered.index("Hi Lada,"), rendered.index("These roles offer realistic daytime administrative opportunities."))
+        self.assertLess(
+            rendered.index("These roles offer realistic daytime administrative opportunities."),
+            rendered.index("Generation summary"),
+        )
+
     def test_template_renders_generation_summary_table(self):
         audit = {
             "platforms": {
@@ -355,7 +375,7 @@ class MainTests(unittest.TestCase):
             main.render_summary_table(audit),
         )
         self.assertIn("Generation summary by platform", rendered)
-        self.assertIn("Rejected", rendered)
+        self.assertNotIn(">Rejected<", rendered)
         self.assertIn("linkedin", rendered)
         self.assertIn("New = postings included in this email run.", rendered)
         self.assertLess(rendered.index("Generation summary"), rendered.index("Job section"))
@@ -374,9 +394,30 @@ class MainTests(unittest.TestCase):
             application_strategy="Apply.",
         )
         jobs = [
-            {"link": "https://example.com/1", "source": "linkedin", "evaluation": evaluation.model_dump_json()},
-            {"link": "https://example.com/2", "source": "linkedin", "evaluation": None},
-            {"link": "https://example.com/3", "source": "linkedin", "evaluation": None},
+            {
+                "link": "https://example.com/1",
+                "source": "linkedin",
+                "screening": main.ScreeningEvaluation(
+                    job_index=1, is_potential_match=True, match_score=60
+                ).model_dump_json(),
+                "evaluation": evaluation.model_dump_json(),
+            },
+            {
+                "link": "https://example.com/2",
+                "source": "linkedin",
+                "screening": main.ScreeningEvaluation(
+                    job_index=2, is_potential_match=False, match_score=25
+                ).model_dump_json(),
+                "evaluation": None,
+            },
+            {
+                "link": "https://example.com/3",
+                "source": "linkedin",
+                "screening": main.ScreeningEvaluation(
+                    job_index=3, is_potential_match=False, match_score=10
+                ).model_dump_json(),
+                "evaluation": None,
+            },
         ]
         audit = main.get_generation_audit([jobs[0], jobs[1], jobs[2]], [(jobs[0], evaluation)])
         row = audit["platforms"]["linkedin"]
@@ -384,7 +425,49 @@ class MainTests(unittest.TestCase):
         self.assertEqual(row["rejected"], 2)
         self.assertEqual(row["evaluated"], 1)
         self.assertEqual(row["recommended"], 1)
+        self.assertEqual(row["scores"]["0-39%"], 2)
+        self.assertEqual(row["scores"]["80-100%"], 1)
         self.assertEqual(row["rejected"] + row["evaluated"], row["new"])
+
+    def test_qualification_summary_is_ranked_and_uses_above_threshold_jobs(self):
+        jobs = [
+            {
+                "title": "Front Office Agent",
+                "description": "Bachelor degree required. Hotel reception experience preferred.",
+                "evaluation": main.SingleJobEvaluation(
+                    job_index=1, is_relevant=True, match_score=75,
+                    job_title="Front Office Agent", company="Hotel AG", location="Zurich",
+                    pros=["Hotel reception is relevant"], cons_or_gaps="",
+                    summary="Good fit.", application_strategy="Apply.",
+                ).model_dump_json(),
+            },
+            {
+                "title": "Reservations Clerk",
+                "description": "Bachelor or Master degree and certificate required.",
+                "evaluation": main.SingleJobEvaluation(
+                    job_index=2, is_relevant=True, match_score=65,
+                    job_title="Reservations Clerk", company="Hotel AG", location="Zurich",
+                    pros=["Reservations experience is relevant"], cons_or_gaps="",
+                    summary="Good fit.", application_strategy="Apply.",
+                ).model_dump_json(),
+            },
+            {
+                "title": "Unrelated Role",
+                "description": "German required.",
+                "evaluation": main.SingleJobEvaluation(
+                    job_index=3, is_relevant=False, match_score=35,
+                    job_title="Unrelated Role", company="Example AG", location="Zurich",
+                    pros=[], cons_or_gaps="", summary="Poor fit.", application_strategy="",
+                ).model_dump_json(),
+            },
+        ]
+        rendered = main.build_qualification_summary(jobs)
+        self.assertIn("University degree (2)", rendered)
+        self.assertIn("Professional diploma or certificate (1)", rendered)
+        self.assertLess(rendered.index("University degree"), rendered.index("Professional diploma"))
+        self.assertNotIn("language", rendered.lower())
+        self.assertNotIn("experience", rendered.lower())
+        self.assertNotIn("Unrelated Role", rendered)
 
     def test_email_summary_describes_sources_and_total(self):
         rendered = main.render_email(
